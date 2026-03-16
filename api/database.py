@@ -1,0 +1,138 @@
+"""SQLite database schema and connection management."""
+
+import sqlite3
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+
+from . import config
+
+_local = threading.local()
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    subject TEXT NOT NULL,
+    input_mode TEXT NOT NULL DEFAULT 'csv',
+    model_override TEXT,
+    sample_size_maths INTEGER,
+    sample_size_english INTEGER,
+    random_seed INTEGER DEFAULT 42,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT,
+    total_strategies INTEGER DEFAULT 0,
+    completed_strategies INTEGER DEFAULT 0,
+    total_rows INTEGER DEFAULT 0,
+    completed_rows INTEGER DEFAULT 0,
+    total_cost_usd REAL DEFAULT 0.0
+);
+
+CREATE TABLE IF NOT EXISTS run_strategies (
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    strategy_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TEXT,
+    completed_at TEXT,
+    rows_total INTEGER DEFAULT 0,
+    rows_completed INTEGER DEFAULT 0,
+    errors INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0.0,
+    PRIMARY KEY (run_id, strategy_name)
+);
+
+CREATE TABLE IF NOT EXISTS run_questions (
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    question_number TEXT NOT NULL,
+    PRIMARY KEY (run_id, question_number)
+);
+
+CREATE TABLE IF NOT EXISTS eval_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    strategy_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    question_number TEXT NOT NULL,
+    total_marks INTEGER NOT NULL,
+    human_mark REAL NOT NULL,
+    ai_mark REAL NOT NULL,
+    error INTEGER NOT NULL DEFAULT 0,
+    justification TEXT,
+    criteria_breakdown TEXT,
+    second_pass_changed INTEGER,
+    debate_rounds INTEGER,
+    debate_outcome TEXT,
+    prompt_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    thinking_tokens INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0.0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_eval_results_strategy ON eval_results(run_id, strategy_name);
+
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+    strategy_name TEXT NOT NULL,
+    field_path TEXT NOT NULL,
+    original_text TEXT NOT NULL,
+    override_text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (strategy_name, field_path)
+);
+
+CREATE TABLE IF NOT EXISTS uploads (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    subject TEXT,
+    mime_type TEXT,
+    file_size INTEGER,
+    storage_path TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS subjects (
+    slug TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    csv_path TEXT NOT NULL,
+    total_rows INTEGER DEFAULT 0,
+    question_count INTEGER DEFAULT 0,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+"""
+
+
+def get_connection() -> sqlite3.Connection:
+    """Get a thread-local SQLite connection."""
+    if not hasattr(_local, "conn") or _local.conn is None:
+        _local.conn = sqlite3.connect(str(config.DB_PATH))
+        _local.conn.row_factory = sqlite3.Row
+        _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA foreign_keys=ON")
+    return _local.conn
+
+
+def init_db():
+    """Initialize the database schema."""
+    conn = get_connection()
+    conn.executescript(SCHEMA)
+    conn.commit()
+
+
+@contextmanager
+def get_db():
+    """Context manager for database operations."""
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise

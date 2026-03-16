@@ -1,0 +1,41 @@
+# Environment & secrets
+.env
+.env.*
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Project-specific
+results/
+debug_q32/
+*.zip
+.wrangler/
+.claude/
+
+# Large test data (not needed in production)
+Maths/q32_test/

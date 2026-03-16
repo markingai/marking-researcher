@@ -1,0 +1,40 @@
+# Frontend (has its own Dockerfile)
+web/
+
+# Results & debug
+results/
+debug_q32/
+
+# Secrets
+.env
+.env.*
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Git & IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Claude & Cloudflare dev
+.claude/
+.wrangler/
+
+# Archives
+*.zip
+
+# Node (shouldn't be here but just in case)
+node_modules/
+
+# Misc
+.DS_Store
+*.md

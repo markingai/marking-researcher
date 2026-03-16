@@ -1,0 +1,17 @@
+# API framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.18
+
+# Authentication
+bcrypt>=4.2.0
+PyJWT>=2.10.0
+
+# Data models
+pydantic>=2.10.0
+
+# HTTP client (eval agent API calls)
+requests>=2.32.0
+
+# PDF processing
+PyMuPDF>=1.25.0
