@@ -15,9 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./api/
 COPY eval_agent/ ./eval_agent/
 
-# Copy data files
-COPY "Evals_tracker - Raw data - maths.csv" .
-COPY "Evals_tracker - Raw data - english .csv" .
+# Copy data files (JSON form required for filenames with spaces)
+COPY ["Evals_tracker - Raw data - maths.csv", "."]
+COPY ["Evals_tracker - Raw data - english .csv", "."]
 
 # Copy PDF submissions (if present)
 COPY Maths/ ./Maths/
