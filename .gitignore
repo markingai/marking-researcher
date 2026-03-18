@@ -31,7 +31,7 @@ Thumbs.db
 .idea/
 
 # Project-specific
-results/
+/results/
 debug_q32/
 *.zip
 .wrangler/

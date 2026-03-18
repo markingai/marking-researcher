@@ -13,7 +13,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Build-time env var (baked into client JS bundle)
-ARG NEXT_PUBLIC_API_URL=https://api-production-955b.up.railway.app
+ARG NEXT_PUBLIC_API_URL=https://api.evals.marking.ai
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN npm run build
