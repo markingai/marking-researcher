@@ -10,6 +10,7 @@ import {
   FileText,
   Settings,
   LogOut,
+  FlaskConical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/runs/new", label: "New Run", icon: Play },
   { href: "/runs", label: "Run History", icon: History },
+  { href: "/autoresearch", label: "Autoresearch", icon: FlaskConical },
   { href: "/prompts", label: "Prompts", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

@@ -26,7 +26,9 @@ MODEL_DEFAULT = MODEL_PRO
 PROJECT_ROOT = Path(__file__).parent.parent
 MATHS_CSV = PROJECT_ROOT / "Evals_tracker - Raw data - maths.csv"
 ENGLISH_CSV = PROJECT_ROOT / "Evals_tracker - Raw data - english .csv"
+EXAMPRO_CSV = PROJECT_ROOT / "gcse_english_exampro.csv"
 RESULTS_DIR = PROJECT_ROOT / "results"
+AUTORESEARCH_DIR = PROJECT_ROOT / "autoresearch"
 
 # Sampling
 MATHS_SAMPLE_SIZE = 50
@@ -44,6 +46,10 @@ REQUEST_TIMEOUT = 300  # seconds, generous for thinking models
 # Parallel execution
 MAX_CONCURRENT = 5  # concurrent API requests per strategy
 THINKING_BUDGET = 4096  # cap thinking tokens (was -1/unlimited, caused timeouts)
+
+# Autoresearch budget
+EXPERIMENT_BUDGET_USD = 3.00  # Max cost per single strategy evaluation
+SESSION_BUDGET_USD = 20.00  # Total budget per autonomous session
 
 # Excluded questions (require image analysis)
 EXCLUDED_QUESTIONS = {"32"}

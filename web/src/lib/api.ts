@@ -418,4 +418,91 @@ export interface SubjectInfo {
   created_at: string | null;
 }
 
+// --- Autoresearch ---
+export interface AutoresearchSession {
+  id: string;
+  status: string;
+  budget_usd: number;
+  spent_usd: number;
+  model: string;
+  sample_size: number;
+  experiments_run: number;
+  best_exact_match: number;
+  best_experiment_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface AutoresearchExperiment {
+  id: string;
+  session_id: string;
+  description: string;
+  strategy_name: string;
+  exact_match: number | null;
+  within_1: number | null;
+  mae: number | null;
+  bias: number | null;
+  cost_usd: number;
+  n: number;
+  model: string | null;
+  kept: boolean;
+  per_question: Record<string, { n: number; exact_match: number; mae: number }> | null;
+  created_at: string;
+}
+
+export interface AutoresearchSessionDetail {
+  session: AutoresearchSession;
+  experiments: AutoresearchExperiment[];
+}
+
+export async function startAutoresearchSession(config: {
+  budget_usd?: number;
+  sample_size?: number;
+  model?: string;
+}) {
+  return request<{ session_id: string; status: string }>(
+    "/api/autoresearch/sessions",
+    { method: "POST", body: JSON.stringify(config) },
+  );
+}
+
+export async function getAutoresearchSessions() {
+  return request<AutoresearchSession[]>("/api/autoresearch/sessions");
+}
+
+export async function getAutoresearchSession(id: string) {
+  return request<AutoresearchSessionDetail>(
+    `/api/autoresearch/sessions/${id}`,
+  );
+}
+
+export async function stopAutoresearchSession(id: string) {
+  return request<{ status: string }>(
+    `/api/autoresearch/sessions/${id}/stop`,
+    { method: "POST" },
+  );
+}
+
+export function subscribeToAutoresearchEvents(
+  sessionId: string,
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+): () => void {
+  const token = getToken();
+  const url = `${API_URL}/api/autoresearch/sessions/${sessionId}/events?token=${token}`;
+  const es = new EventSource(url);
+
+  es.onmessage = (e) => {
+    try {
+      const parsed = JSON.parse(e.data);
+      onEvent(parsed.event, parsed.data);
+    } catch {
+      // ignore
+    }
+  };
+
+  es.onerror = () => {};
+
+  return () => es.close();
+}
+
 export { ApiError };

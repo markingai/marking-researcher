@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
 from .database import init_db
-from .routers import auth, strategies, datasets, runs, results, prompts, uploads, settings, subjects
+from .routers import auth, strategies, datasets, runs, results, prompts, uploads, settings, subjects, autoresearch
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ app.include_router(prompts.router)
 app.include_router(uploads.router)
 app.include_router(settings.router)
 app.include_router(subjects.router)
+app.include_router(autoresearch.router)
 
 
 @app.get("/api/health")

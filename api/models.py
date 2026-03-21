@@ -196,3 +196,44 @@ class SettingsResponse(BaseModel):
     api_keys: dict[str, bool]  # provider → configured
     models: list[ModelInfo]
     rate_limits: dict[str, int]
+
+
+# --- Autoresearch ---
+
+class StartAutoresearchRequest(BaseModel):
+    budget_usd: float = 20.0
+    sample_size: int = 30
+    model: str = "gemini-2.5-pro"
+
+class AutoresearchSessionResponse(BaseModel):
+    id: str
+    status: str
+    budget_usd: float
+    spent_usd: float
+    model: str
+    sample_size: int
+    experiments_run: int
+    best_exact_match: float
+    best_experiment_id: str | None
+    created_at: str
+    completed_at: str | None
+
+class AutoresearchExperimentResponse(BaseModel):
+    id: str
+    session_id: str
+    description: str
+    strategy_name: str
+    exact_match: float | None
+    within_1: float | None
+    mae: float | None
+    bias: float | None
+    cost_usd: float
+    n: int
+    model: str | None
+    kept: bool
+    per_question: dict | None = None
+    created_at: str
+
+class AutoresearchSessionDetailResponse(BaseModel):
+    session: AutoresearchSessionResponse
+    experiments: list[AutoresearchExperimentResponse]

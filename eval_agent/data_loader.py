@@ -20,6 +20,10 @@ class MarkingRow:
     existing_ai_mark: float | None = None
     source_text: str | None = None  # English only: the 4 source articles
     image_url: str | None = None
+    # Enrichment fields (Exampro dataset)
+    marking_guide_text: str | None = None  # Full structured markdown mark scheme
+    mark_type: str | None = None  # "reading" or "writing"
+    assessment_name: str | None = None  # Exam paper identifier
 
 
 def load_maths(path: Path | None = None) -> list[MarkingRow]:
@@ -119,6 +123,36 @@ def stratified_sample(
         sampled.append(remaining_pool.pop())
 
     return sampled[:n]
+
+
+def load_exampro(path: Path | None = None) -> list[MarkingRow]:
+    """Load the enriched Exampro GCSE English dataset."""
+    path = path or config.EXAMPRO_CSV
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            hm = r.get("human_mark", "").strip()
+            if not hm:
+                continue
+            # Use enriched marking_guide_text when available, fall back to marking_guide
+            guide_text = r.get("marking_guide_text", "").strip()
+            guide = guide_text if guide_text else r.get("marking_guide", "")
+            rows.append(MarkingRow(
+                row_id=r["case_id"],
+                subject="english",
+                question_number=r["question_number"],
+                question_text=r.get("question_text", ""),
+                total_marks=int(r["total_marks"]),
+                marking_guide=guide,
+                student_answer=r["student_answer"],
+                human_mark=float(hm),
+                source_text=r.get("source_text", ""),
+                marking_guide_text=guide_text or None,
+                mark_type=r.get("mark_type", ""),
+                assessment_name=r.get("assessment_name", ""),
+            ))
+    return rows
 
 
 def get_few_shot_examples(

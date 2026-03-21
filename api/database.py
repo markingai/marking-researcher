@@ -106,6 +106,40 @@ CREATE TABLE IF NOT EXISTS subjects (
     is_builtin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS autoresearch_sessions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'running',
+    budget_usd REAL NOT NULL DEFAULT 20.0,
+    spent_usd REAL NOT NULL DEFAULT 0.0,
+    model TEXT NOT NULL DEFAULT 'gemini-2.5-pro',
+    sample_size INTEGER NOT NULL DEFAULT 30,
+    experiments_run INTEGER NOT NULL DEFAULT 0,
+    best_exact_match REAL NOT NULL DEFAULT 0.0,
+    best_experiment_id TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS autoresearch_experiments (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES autoresearch_sessions(id),
+    description TEXT NOT NULL,
+    strategy_name TEXT NOT NULL,
+    exact_match REAL,
+    within_1 REAL,
+    mae REAL,
+    bias REAL,
+    cost_usd REAL NOT NULL DEFAULT 0.0,
+    n INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    kept INTEGER NOT NULL DEFAULT 0,
+    per_question_json TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_autoresearch_exp_session
+    ON autoresearch_experiments(session_id);
 """
 
 
