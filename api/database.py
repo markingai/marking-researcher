@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS autoresearch_sessions (
     best_exact_match REAL NOT NULL DEFAULT 0.0,
     best_experiment_id TEXT,
     created_at TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    report_md TEXT
 );
 
 CREATE TABLE IF NOT EXISTS autoresearch_experiments (
@@ -135,6 +136,8 @@ CREATE TABLE IF NOT EXISTS autoresearch_experiments (
     model TEXT,
     kept INTEGER NOT NULL DEFAULT 0,
     per_question_json TEXT,
+    prompt_text TEXT,
+    config_json TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -158,6 +161,25 @@ def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
     conn.commit()
+
+    # Migrate: add columns that may be missing on existing DBs
+    _migrate_add_columns(conn)
+
+
+def _migrate_add_columns(conn: sqlite3.Connection):
+    """Add new columns to existing tables if they don't exist yet."""
+    migrations = [
+        ("autoresearch_experiments", "prompt_text", "TEXT"),
+        ("autoresearch_experiments", "config_json", "TEXT"),
+        ("autoresearch_sessions", "report_md", "TEXT"),
+    ]
+    for table, column, col_type in migrations:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
 
 
 @contextmanager

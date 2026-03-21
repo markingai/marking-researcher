@@ -217,6 +217,7 @@ class AutoresearchSessionResponse(BaseModel):
     best_experiment_id: str | None
     created_at: str
     completed_at: str | None
+    report_md: str | None = None
 
 class AutoresearchExperimentResponse(BaseModel):
     id: str
@@ -232,6 +233,8 @@ class AutoresearchExperimentResponse(BaseModel):
     model: str | None
     kept: bool
     per_question: dict | None = None
+    prompt_text: str | None = None
+    config_json: str | None = None
     created_at: str
 
 class AutoresearchSessionDetailResponse(BaseModel):

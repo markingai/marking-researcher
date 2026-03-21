@@ -36,6 +36,7 @@ def _row_to_session(row) -> AutoresearchSessionResponse:
         best_experiment_id=row["best_experiment_id"],
         created_at=row["created_at"],
         completed_at=row["completed_at"],
+        report_md=row["report_md"] if "report_md" in row.keys() else None,
     )
 
 
@@ -61,6 +62,8 @@ def _row_to_experiment(row) -> AutoresearchExperimentResponse:
         model=row["model"],
         kept=bool(row["kept"]),
         per_question=per_q,
+        prompt_text=row["prompt_text"] if "prompt_text" in row.keys() else None,
+        config_json=row["config_json"] if "config_json" in row.keys() else None,
         created_at=row["created_at"],
     )
 

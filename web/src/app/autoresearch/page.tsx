@@ -34,6 +34,9 @@ import {
   Loader2,
   DollarSign,
   Zap,
+  ChevronRight,
+  ChevronDown,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -53,6 +56,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Legend,
 } from "recharts";
 
 export default function AutoresearchPage() {
@@ -61,10 +65,18 @@ export default function AutoresearchPage() {
   const [experiments, setExperiments] = useState<AutoresearchExperiment[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [expandedExperiment, setExpandedExperiment] = useState<string | null>(null);
+
+  // Progress tracking
+  const [currentProgress, setCurrentProgress] = useState<{
+    experiment_id: string;
+    rows_completed: number;
+    rows_total: number;
+  } | null>(null);
 
   // Config
   const [budget, setBudget] = useState(20);
-  const [sampleSize, setSampleSize] = useState(30);
+  const [sampleSize, setSampleSize] = useState(50);
   const [model, setModel] = useState("gemini-2.5-pro");
 
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -115,7 +127,20 @@ export default function AutoresearchPage() {
     }
 
     const cleanup = subscribeToAutoresearchEvents(sessionId, (event, data) => {
-      if (event === "experiment_complete") {
+      if (event === "experiment_progress") {
+        setCurrentProgress({
+          experiment_id: data.experiment_id as string,
+          rows_completed: data.rows_completed as number,
+          rows_total: data.rows_total as number,
+        });
+      } else if (event === "experiment_start") {
+        setCurrentProgress({
+          experiment_id: data.experiment_id as string,
+          rows_completed: 0,
+          rows_total: data.rows_total as number || 0,
+        });
+      } else if (event === "experiment_complete") {
+        setCurrentProgress(null);
         const exp = data as unknown as AutoresearchExperiment & {
           spent_so_far: number;
           budget_usd: number;
@@ -135,7 +160,9 @@ export default function AutoresearchPage() {
             n: exp.n,
             model: null,
             kept: exp.kept,
-            per_question: exp.per_question as Record<string, { n: number; exact_match: number; mae: number }> | null,
+            per_question: exp.per_question as AutoresearchExperiment["per_question"],
+            prompt_text: (data as Record<string, unknown>).prompt_text as string || null,
+            config_json: (data as Record<string, unknown>).config_json as string || null,
             created_at: new Date().toISOString(),
           },
         ]);
@@ -152,14 +179,20 @@ export default function AutoresearchPage() {
               }
             : prev,
         );
-      } else if (event === "experiment_start") {
-        // Could show a "running" indicator
       } else if (event === "session_complete") {
+        setCurrentProgress(null);
         setActiveSession((prev) =>
-          prev ? { ...prev, status: (data as Record<string, unknown>).status as string } : prev,
+          prev
+            ? {
+                ...prev,
+                status: (data as Record<string, unknown>).status as string,
+                report_md: ((data as Record<string, unknown>).report_md as string) || null,
+              }
+            : prev,
         );
         toast.success("Research session completed!");
       } else if (event === "error") {
+        setCurrentProgress(null);
         setActiveSession((prev) => (prev ? { ...prev, status: "failed" } : prev));
         toast.error(`Session error: ${(data as Record<string, unknown>).message}`);
       }
@@ -195,6 +228,7 @@ export default function AutoresearchPage() {
         best_experiment_id: null,
         created_at: new Date().toISOString(),
         completed_at: null,
+        report_md: null,
       };
       setActiveSession(newSession);
       setExperiments([]);
@@ -213,12 +247,13 @@ export default function AutoresearchPage() {
     try {
       await stopAutoresearchSession(activeSession.id);
       toast.info("Stopping session...");
-    } catch (err) {
+    } catch {
       toast.error("Failed to stop session");
     }
   };
 
   const isRunning = activeSession?.status === "running";
+  const isCompleted = activeSession?.status === "completed" || activeSession?.status === "stopped";
   const bestExperiment = experiments.find((e) => e.kept && e.exact_match === activeSession?.best_exact_match);
 
   // Per-question chart data from best experiment
@@ -227,6 +262,7 @@ export default function AutoresearchPage() {
         .map(([qn, m]) => ({
           question: qn.replace("Question ", "Q"),
           exact_match: m.exact_match,
+          within_1: m.within_1 ?? 0,
           mae: m.mae,
           n: m.n,
         }))
@@ -294,8 +330,16 @@ export default function AutoresearchPage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <div className="text-sm font-medium">
-                      Experiment {activeSession.experiments_run} running...
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                      {currentProgress ? (
+                        <>
+                          Experiment {activeSession.experiments_run + 1} — Evaluating row{" "}
+                          {currentProgress.rows_completed}/{currentProgress.rows_total}
+                        </>
+                      ) : (
+                        <>Experiment {activeSession.experiments_run + 1} — Starting...</>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       Model: {activeSession.model} | Sample: {activeSession.sample_size} rows
@@ -306,6 +350,24 @@ export default function AutoresearchPage() {
                     Stop
                   </Button>
                 </div>
+
+                {/* Row-level progress */}
+                {currentProgress && currentProgress.rows_total > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Evaluation progress</span>
+                      <span>
+                        {currentProgress.rows_completed}/{currentProgress.rows_total} rows
+                      </span>
+                    </div>
+                    <Progress
+                      value={(currentProgress.rows_completed / currentProgress.rows_total) * 100}
+                      className="h-1.5"
+                    />
+                  </div>
+                )}
+
+                {/* Budget progress */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-sm">
                     <span>Budget</span>
@@ -372,13 +434,13 @@ export default function AutoresearchPage() {
         </Card>
 
         {/* Section 2: Experiment Log */}
-        {experiments.length > 0 && (
+        {(experiments.length > 0 || (isRunning && currentProgress)) && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span>Experiment Log</span>
                 <Badge variant="secondary">
-                  {experiments.length} experiments
+                  {experiments.length} experiment{experiments.length !== 1 ? "s" : ""}
                 </Badge>
               </CardTitle>
             </CardHeader>
@@ -386,7 +448,7 @@ export default function AutoresearchPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8">#</TableHead>
+                    <TableHead className="w-10">#</TableHead>
                     <TableHead>Strategy</TableHead>
                     <TableHead className="text-right">Exact %</TableHead>
                     <TableHead className="text-right">Within 1</TableHead>
@@ -401,73 +463,188 @@ export default function AutoresearchPage() {
                     const isBest =
                       exp.kept &&
                       exp.exact_match === activeSession?.best_exact_match;
+                    const isExpanded = expandedExperiment === exp.id;
                     return (
-                      <TableRow
-                        key={exp.id}
-                        className={
-                          exp.kept
-                            ? "bg-emerald-500/5"
-                            : "opacity-60"
-                        }
-                      >
-                        <TableCell className="font-mono text-xs">
-                          {i + 1}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {isBest && (
-                              <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                            )}
-                            <div>
-                              <div className="font-medium text-sm">
-                                {exp.description}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {exp.strategy_name}
+                      <>
+                        <TableRow
+                          key={exp.id}
+                          className={`cursor-pointer transition-colors ${
+                            exp.kept
+                              ? "bg-emerald-500/5 hover:bg-emerald-500/10"
+                              : "opacity-60 hover:opacity-80"
+                          }`}
+                          onClick={() =>
+                            setExpandedExperiment(isExpanded ? null : exp.id)
+                          }
+                        >
+                          <TableCell className="font-mono text-xs">
+                            <div className="flex items-center gap-1">
+                              {isExpanded ? (
+                                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                              )}
+                              {i + 1}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {isBest && (
+                                <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                              )}
+                              <div>
+                                <div className="font-medium text-sm">
+                                  {exp.description}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {exp.strategy_name}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {exp.exact_match != null
-                            ? `${exp.exact_match.toFixed(1)}%`
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {exp.within_1 != null
-                            ? `${exp.within_1.toFixed(1)}%`
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {exp.mae != null ? exp.mae.toFixed(2) : "-"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {exp.bias != null
-                            ? `${exp.bias >= 0 ? "+" : ""}${exp.bias.toFixed(2)}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${exp.cost_usd.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {exp.kept ? (
-                            <Badge
-                              variant="outline"
-                              className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                            >
-                              <Check className="mr-1 h-3 w-3" />
-                              Kept
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              <X className="mr-1 h-3 w-3" />
-                              Discarded
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {exp.exact_match != null
+                              ? `${exp.exact_match.toFixed(1)}%`
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {exp.within_1 != null
+                              ? `${exp.within_1.toFixed(1)}%`
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {exp.mae != null ? exp.mae.toFixed(2) : "-"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {exp.bias != null
+                              ? `${exp.bias >= 0 ? "+" : ""}${exp.bias.toFixed(2)}`
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            ${exp.cost_usd.toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {exp.kept ? (
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              >
+                                <Check className="mr-1 h-3 w-3" />
+                                Kept
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground">
+                                <X className="mr-1 h-3 w-3" />
+                                Discarded
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Expanded detail row */}
+                        {isExpanded && (
+                          <TableRow key={`${exp.id}-detail`}>
+                            <TableCell colSpan={8} className="bg-muted/30 p-4">
+                              <div className="space-y-4">
+                                {/* System Prompt */}
+                                <div>
+                                  <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                    System Prompt
+                                  </h4>
+                                  {exp.prompt_text ? (
+                                    <pre className="whitespace-pre-wrap text-xs bg-background border rounded-md p-3 max-h-48 overflow-y-auto font-mono">
+                                      {exp.prompt_text}
+                                    </pre>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground italic">
+                                      Prompt text not recorded for this experiment
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Config */}
+                                {exp.config_json && (
+                                  <div>
+                                    <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                      Configuration
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                      {Object.entries(
+                                        JSON.parse(exp.config_json) as Record<string, unknown>
+                                      ).map(([key, val]) => (
+                                        <Badge key={key} variant="secondary" className="text-xs font-mono">
+                                          {key}: {String(val)}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Per-question breakdown for this experiment */}
+                                {exp.per_question && (
+                                  <div>
+                                    <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                      Per-Question Breakdown
+                                    </h4>
+                                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                      {Object.entries(exp.per_question)
+                                        .sort(([a], [b]) => a.localeCompare(b))
+                                        .map(([qn, m]) => (
+                                          <div
+                                            key={qn}
+                                            className="rounded-md border bg-background p-2 text-center"
+                                          >
+                                            <div className="text-[10px] text-muted-foreground">
+                                              {qn.replace("Question ", "Q")}
+                                            </div>
+                                            <div className="text-sm font-bold">
+                                              {m.exact_match.toFixed(0)}%
+                                            </div>
+                                            <div className="text-[10px] text-muted-foreground">
+                                              W/in 1: {m.within_1 != null ? `${m.within_1.toFixed(0)}%` : "N/A"}
+                                            </div>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
                     );
                   })}
+
+                  {/* Running experiment placeholder row */}
+                  {isRunning && currentProgress && (
+                    <TableRow className="bg-violet-500/5">
+                      <TableCell className="font-mono text-xs">
+                        {experiments.length + 1}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                          <div>
+                            <div className="text-sm font-medium text-muted-foreground">
+                              Running...
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {currentProgress.rows_completed}/{currentProgress.rows_total} rows evaluated
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell colSpan={6}>
+                        <Progress
+                          value={
+                            (currentProgress.rows_completed / currentProgress.rows_total) * 100
+                          }
+                          className="h-1.5"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
@@ -522,16 +699,16 @@ export default function AutoresearchPage() {
               </CardContent>
             </Card>
 
-            {/* Per-question breakdown */}
+            {/* Per-question breakdown — grouped bar chart */}
             {perQuestionData.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Per-Question Exact Match %
+                    Per-Question Accuracy (Best Strategy)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={perQuestionData}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                       <XAxis
@@ -552,19 +729,54 @@ export default function AutoresearchPage() {
                             <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
                               <div className="font-medium">{d.question}</div>
                               <div>Exact: {d.exact_match.toFixed(1)}%</div>
+                              <div>Within 1: {d.within_1.toFixed(1)}%</div>
                               <div>MAE: {d.mae.toFixed(2)}</div>
                               <div>n={d.n}</div>
                             </div>
                           );
                         }}
                       />
-                      <Bar dataKey="exact_match" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                      <Legend
+                        wrapperStyle={{ fontSize: "11px" }}
+                      />
+                      <Bar
+                        dataKey="exact_match"
+                        name="Exact Match"
+                        fill="hsl(var(--chart-1))"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Bar
+                        dataKey="within_1"
+                        name="Within 1 Mark"
+                        fill="hsl(var(--chart-2))"
+                        radius={[4, 4, 0, 0]}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
             )}
           </div>
+        )}
+
+        {/* Section 4: Session Report */}
+        {isCompleted && activeSession?.report_md && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-violet-500" />
+                Session Report
+              </CardTitle>
+              <CardDescription>
+                Automated analysis of all strategies tested in this session
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReportRenderer markdown={activeSession.report_md} />
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Session History */}
@@ -613,4 +825,156 @@ export default function AutoresearchPage() {
       </div>
     </AppShell>
   );
+}
+
+
+// Simple Markdown renderer for the report (no external dependency)
+function ReportRenderer({ markdown }: { markdown: string }) {
+  const lines = markdown.split("\n");
+  const elements: React.ReactNode[] = [];
+  let tableRows: string[][] = [];
+  let inTable = false;
+  let tableIndex = 0;
+
+  const flushTable = () => {
+    if (tableRows.length === 0) return;
+    const headers = tableRows[0];
+    const body = tableRows.slice(2); // skip separator row
+    elements.push(
+      <div key={`table-${tableIndex}`} className="overflow-x-auto my-3">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr>
+              {headers.map((h, i) => (
+                <th
+                  key={i}
+                  className="border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground"
+                >
+                  {h.trim()}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, ri) => (
+              <tr key={ri} className="border-b border-border/50">
+                {row.map((cell, ci) => (
+                  <td key={ci} className="px-2 py-1.5">
+                    {renderInline(cell.trim())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    tableRows = [];
+    tableIndex++;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Table row detection
+    if (line.startsWith("|")) {
+      inTable = true;
+      const cells = line
+        .split("|")
+        .slice(1, -1); // remove empty first/last from split
+      tableRows.push(cells);
+      continue;
+    } else if (inTable) {
+      inTable = false;
+      flushTable();
+    }
+
+    // Headers
+    if (line.startsWith("# ")) {
+      elements.push(
+        <h2 key={i} className="text-lg font-bold mt-4 mb-2">
+          {line.slice(2)}
+        </h2>
+      );
+    } else if (line.startsWith("## ")) {
+      elements.push(
+        <h3 key={i} className="text-base font-semibold mt-4 mb-2 text-foreground">
+          {line.slice(3)}
+        </h3>
+      );
+    } else if (line.startsWith("- ")) {
+      elements.push(
+        <div key={i} className="flex gap-2 text-sm pl-2 py-0.5">
+          <span className="text-muted-foreground">•</span>
+          <span>{renderInline(line.slice(2))}</span>
+        </div>
+      );
+    } else if (line.match(/^\d+\. /)) {
+      const match = line.match(/^(\d+)\. (.*)$/);
+      if (match) {
+        elements.push(
+          <div key={i} className="flex gap-2 text-sm pl-2 py-0.5">
+            <span className="text-muted-foreground font-mono">{match[1]}.</span>
+            <span>{renderInline(match[2])}</span>
+          </div>
+        );
+      }
+    } else if (line.trim() === "") {
+      // skip
+    } else {
+      elements.push(
+        <p key={i} className="text-sm py-0.5">
+          {renderInline(line)}
+        </p>
+      );
+    }
+  }
+
+  // Flush any remaining table
+  if (inTable) flushTable();
+
+  return <>{elements}</>;
+}
+
+// Inline formatting (bold, code, etc.)
+function renderInline(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let keyIdx = 0;
+
+  while (remaining.length > 0) {
+    // Bold: **text**
+    const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+    // Code: `text`
+    const codeMatch = remaining.match(/`(.+?)`/);
+
+    // Find earliest match
+    const boldIdx = boldMatch?.index ?? Infinity;
+    const codeIdx = codeMatch?.index ?? Infinity;
+
+    if (boldIdx === Infinity && codeIdx === Infinity) {
+      parts.push(remaining);
+      break;
+    }
+
+    if (boldIdx <= codeIdx && boldMatch) {
+      parts.push(remaining.slice(0, boldIdx));
+      parts.push(
+        <strong key={keyIdx++} className="font-semibold">
+          {boldMatch[1]}
+        </strong>
+      );
+      remaining = remaining.slice(boldIdx + boldMatch[0].length);
+    } else if (codeMatch) {
+      parts.push(remaining.slice(0, codeIdx));
+      parts.push(
+        <code key={keyIdx++} className="rounded bg-muted px-1 py-0.5 text-xs font-mono">
+          {codeMatch[1]}
+        </code>
+      );
+      remaining = remaining.slice(codeIdx + codeMatch[0].length);
+    }
+  }
+
+  return parts.length === 1 ? parts[0] : <>{parts}</>;
 }

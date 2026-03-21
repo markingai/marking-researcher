@@ -431,6 +431,7 @@ export interface AutoresearchSession {
   best_experiment_id: string | null;
   created_at: string;
   completed_at: string | null;
+  report_md: string | null;
 }
 
 export interface AutoresearchExperiment {
@@ -446,7 +447,9 @@ export interface AutoresearchExperiment {
   n: number;
   model: string | null;
   kept: boolean;
-  per_question: Record<string, { n: number; exact_match: number; mae: number }> | null;
+  per_question: Record<string, { n: number; exact_match: number; within_1?: number; mae: number; bias?: number }> | null;
+  prompt_text: string | null;
+  config_json: string | null;
   created_at: string;
 }
 
