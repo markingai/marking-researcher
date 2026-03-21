@@ -18,6 +18,7 @@ COPY eval_agent/ ./eval_agent/
 # Copy data files (JSON form required for filenames with spaces)
 COPY ["Evals_tracker - Raw data - maths.csv", "."]
 COPY ["Evals_tracker - Raw data - english .csv", "."]
+COPY gcse_english_exampro.csv .
 
 # Copy PDF submissions (if present)
 COPY Maths/ ./Maths/

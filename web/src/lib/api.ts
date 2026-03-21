@@ -495,12 +495,18 @@ export function subscribeToAutoresearchEvents(
     try {
       const parsed = JSON.parse(e.data);
       onEvent(parsed.event, parsed.data);
+      // Close on terminal events to prevent auto-reconnect loop
+      if (parsed.event === "session_complete" || parsed.event === "error") {
+        es.close();
+      }
     } catch {
       // ignore
     }
   };
 
-  es.onerror = () => {};
+  es.onerror = () => {
+    es.close();
+  };
 
   return () => es.close();
 }
