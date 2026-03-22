@@ -80,6 +80,7 @@ export default function AutoresearchPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [activeTab, setActiveTab] = useState("session");
+  const [expandedLeaderboardRow, setExpandedLeaderboardRow] = useState<string | null>(null);
 
   // Progress tracking
   const [currentProgress, setCurrentProgress] = useState<{
@@ -286,7 +287,6 @@ export default function AutoresearchPage() {
 
   const handleViewSession = (sessionId: string) => {
     loadSessionDetail(sessionId);
-    setActiveTab("session");
   };
 
   const isRunning = activeSession?.status === "running";
@@ -895,50 +895,84 @@ export default function AutoresearchPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {leaderboard.map((entry, i) => (
-                            <TableRow
-                              key={entry.strategy_name}
-                              className={i === 0 ? "bg-amber-500/5" : i < 3 ? "bg-muted/30" : ""}
-                            >
-                              <TableCell className="font-mono text-xs">
-                                <div className="flex items-center gap-1">
-                                  {i === 0 ? (
-                                    <Trophy className="h-4 w-4 text-amber-500" />
-                                  ) : i === 1 ? (
-                                    <Medal className="h-4 w-4 text-slate-400" />
-                                  ) : i === 2 ? (
-                                    <Medal className="h-4 w-4 text-amber-700" />
-                                  ) : (
-                                    <span className="pl-1">{i + 1}</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-medium text-sm">{entry.strategy_name}</div>
-                                <div className="text-xs text-muted-foreground truncate max-w-[300px]">
-                                  {entry.description}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right font-mono font-bold">
-                                {entry.best_exact_match.toFixed(1)}%
-                              </TableCell>
-                              <TableCell className="text-right font-mono">
-                                {entry.avg_exact_match.toFixed(1)}%
-                              </TableCell>
-                              <TableCell className="text-right font-mono">
-                                {entry.avg_within_1.toFixed(1)}%
-                              </TableCell>
-                              <TableCell className="text-right font-mono">
-                                {entry.avg_mae.toFixed(2)}
-                              </TableCell>
-                              <TableCell className="text-right font-mono">
-                                ${entry.avg_cost_usd.toFixed(2)}
-                              </TableCell>
-                              <TableCell className="text-right font-mono">
-                                {entry.times_tested}x
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {leaderboard.map((entry, i) => {
+                            const isLbExpanded = expandedLeaderboardRow === entry.strategy_name;
+                            return (
+                              <>
+                                <TableRow
+                                  key={entry.strategy_name}
+                                  className={`cursor-pointer transition-colors ${i === 0 ? "bg-amber-500/5 hover:bg-amber-500/10" : i < 3 ? "bg-muted/30 hover:bg-muted/50" : "hover:bg-accent"}`}
+                                  onClick={() => setExpandedLeaderboardRow(isLbExpanded ? null : entry.strategy_name)}
+                                >
+                                  <TableCell className="font-mono text-xs">
+                                    <div className="flex items-center gap-1">
+                                      {isLbExpanded ? (
+                                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                      ) : (
+                                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                                      )}
+                                      {i === 0 ? (
+                                        <Trophy className="h-4 w-4 text-amber-500" />
+                                      ) : i === 1 ? (
+                                        <Medal className="h-4 w-4 text-slate-400" />
+                                      ) : i === 2 ? (
+                                        <Medal className="h-4 w-4 text-amber-700" />
+                                      ) : (
+                                        <span className="pl-1">{i + 1}</span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="font-medium text-sm">{entry.strategy_name}</div>
+                                    <div className="text-xs text-muted-foreground truncate max-w-[300px]">
+                                      {entry.description}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono font-bold">
+                                    {entry.best_exact_match.toFixed(1)}%
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {entry.avg_exact_match.toFixed(1)}%
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {entry.avg_within_1.toFixed(1)}%
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {entry.avg_mae.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    ${entry.avg_cost_usd.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {entry.times_tested}x
+                                  </TableCell>
+                                </TableRow>
+                                {isLbExpanded && (
+                                  <TableRow key={`${entry.strategy_name}-detail`}>
+                                    <TableCell colSpan={8} className="bg-muted/30 p-4">
+                                      <div className="space-y-2">
+                                        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
+                                          Full Description
+                                        </h4>
+                                        <p className="text-sm whitespace-pre-wrap">
+                                          {entry.description}
+                                        </p>
+                                        <div className="flex gap-4 text-xs text-muted-foreground pt-1">
+                                          {entry.first_tested && (
+                                            <span>First tested: {new Date(entry.first_tested).toLocaleDateString()}</span>
+                                          )}
+                                          {entry.last_tested && (
+                                            <span>Last tested: {new Date(entry.last_tested).toLocaleDateString()}</span>
+                                          )}
+                                          <span>Avg bias: {entry.avg_bias >= 0 ? "+" : ""}{entry.avg_bias.toFixed(2)}</span>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </CardContent>
@@ -959,7 +993,8 @@ export default function AutoresearchPage() {
                       {timeline.length > 0 ? (
                         <ResponsiveContainer width="100%" height={280}>
                           <LineChart data={timeline.map(t => ({
-                            session: t.session_number ? `Session #${t.session_number}` : new Date(t.created_at).toLocaleDateString(),
+                            session: t.session_number ? `#${t.session_number}` : `#${timeline.indexOf(t) + 1}`,
+                            date: new Date(t.created_at).toLocaleDateString(),
                             best_exact: t.best_exact_match,
                             experiments: t.experiments_run,
                             spent: t.spent_usd,
@@ -970,10 +1005,11 @@ export default function AutoresearchPage() {
                             <Tooltip
                               content={({ active, payload }) => {
                                 if (!active || !payload?.length) return null;
-                                const d = payload[0].payload as { session: string; best_exact: number; experiments: number; spent: number };
+                                const d = payload[0].payload as { session: string; date: string; best_exact: number; experiments: number; spent: number };
                                 return (
                                   <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
-                                    <div className="font-medium">{d.session}</div>
+                                    <div className="font-medium">Session {d.session}</div>
+                                    <div className="text-muted-foreground">{d.date}</div>
                                     <div>Best: {d.best_exact.toFixed(1)}%</div>
                                     <div>{d.experiments} experiments</div>
                                     <div>Spent: ${d.spent.toFixed(2)}</div>
@@ -985,9 +1021,10 @@ export default function AutoresearchPage() {
                               type="monotone"
                               dataKey="best_exact"
                               name="Best Exact %"
-                              stroke="hsl(var(--chart-1))"
-                              strokeWidth={2}
-                              dot={{ fill: "hsl(var(--chart-1))", r: 5 }}
+                              stroke="hsl(142, 71%, 45%)"
+                              strokeWidth={2.5}
+                              dot={{ fill: "hsl(142, 71%, 45%)", r: 5, strokeWidth: 0 }}
+                              connectNulls
                             />
                           </LineChart>
                         </ResponsiveContainer>
@@ -1063,6 +1100,95 @@ export default function AutoresearchPage() {
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Selected session summary */}
+                  {activeSession && experiments.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            Experiments
+                            {activeSession.session_number && (
+                              <Badge variant="outline" className="text-xs">
+                                Session #{activeSession.session_number}
+                              </Badge>
+                            )}
+                          </span>
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <span>Best: {activeSession.best_exact_match.toFixed(1)}%</span>
+                            <span>${activeSession.spent_usd.toFixed(2)}</span>
+                            <Badge variant="secondary">
+                              {experiments.length} experiment{experiments.length !== 1 ? "s" : ""}
+                            </Badge>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-10">#</TableHead>
+                              <TableHead>Strategy</TableHead>
+                              <TableHead className="text-right">Exact %</TableHead>
+                              <TableHead className="text-right">Within 1</TableHead>
+                              <TableHead className="text-right">MAE</TableHead>
+                              <TableHead className="text-right">Bias</TableHead>
+                              <TableHead className="text-right">Cost</TableHead>
+                              <TableHead className="text-center">Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {experiments.map((exp, i) => {
+                              const isBest = exp.kept && exp.exact_match === activeSession.best_exact_match;
+                              return (
+                                <TableRow
+                                  key={exp.id}
+                                  className={exp.kept ? "bg-emerald-500/5" : "opacity-60"}
+                                >
+                                  <TableCell className="font-mono text-xs">{i + 1}</TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      {isBest && <Trophy className="h-3.5 w-3.5 text-amber-500" />}
+                                      <div>
+                                        <div className="font-medium text-sm">{exp.description}</div>
+                                        <div className="text-xs text-muted-foreground">{exp.strategy_name}</div>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {exp.exact_match != null ? `${exp.exact_match.toFixed(1)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {exp.within_1 != null ? `${exp.within_1.toFixed(1)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {exp.mae != null ? exp.mae.toFixed(2) : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    {exp.bias != null ? `${exp.bias >= 0 ? "+" : ""}${exp.bias.toFixed(2)}` : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
+                                    ${exp.cost_usd.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    {exp.kept ? (
+                                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                        <Check className="mr-1 h-3 w-3" />Kept
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-muted-foreground">
+                                        <X className="mr-1 h-3 w-3" />Discarded
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   {/* Session Report for selected session */}
                   {activeSession?.report_md && (
