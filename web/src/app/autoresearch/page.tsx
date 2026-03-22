@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
   SelectTrigger,
@@ -40,6 +41,7 @@ import {
   Medal,
   TrendingUp,
   Sparkles,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -77,6 +79,7 @@ export default function AutoresearchPage() {
   const [expandedExperiment, setExpandedExperiment] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [activeTab, setActiveTab] = useState("session");
 
   // Progress tracking
   const [currentProgress, setCurrentProgress] = useState<{
@@ -262,6 +265,7 @@ export default function AutoresearchPage() {
       setExperiments([]);
       setSessions((prev) => [newSession, ...prev]);
       subscribeToSession(result.session_id);
+      setActiveTab("session");
       toast.success("Research session started!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start session");
@@ -278,6 +282,11 @@ export default function AutoresearchPage() {
     } catch {
       toast.error("Failed to stop session");
     }
+  };
+
+  const handleViewSession = (sessionId: string) => {
+    loadSessionDetail(sessionId);
+    setActiveTab("session");
   };
 
   const isRunning = activeSession?.status === "running";
@@ -340,694 +349,759 @@ export default function AutoresearchPage() {
           </Badge>
         </div>
 
-        {/* Leaderboard + Timeline */}
-        {leaderboard.length > 0 && (
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* All-Time Leaderboard */}
-            <Card className="md:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Medal className="h-5 w-5 text-amber-500" />
-                  All-Time Strategy Leaderboard
-                </CardTitle>
-                <CardDescription>
-                  Cross-session rankings — best strategies across all research sessions
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">#</TableHead>
-                      <TableHead>Strategy</TableHead>
-                      <TableHead className="text-right">Best Exact%</TableHead>
-                      <TableHead className="text-right">Avg Exact%</TableHead>
-                      <TableHead className="text-right">Avg W/in 1%</TableHead>
-                      <TableHead className="text-right">Avg MAE</TableHead>
-                      <TableHead className="text-right">Avg Cost</TableHead>
-                      <TableHead className="text-right">Tested</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {leaderboard.map((entry, i) => (
-                      <TableRow
-                        key={entry.strategy_name}
-                        className={i === 0 ? "bg-amber-500/5" : i < 3 ? "bg-muted/30" : ""}
-                      >
-                        <TableCell className="font-mono text-xs">
-                          <div className="flex items-center gap-1">
-                            {i === 0 ? (
-                              <Trophy className="h-4 w-4 text-amber-500" />
-                            ) : i === 1 ? (
-                              <Medal className="h-4 w-4 text-slate-400" />
-                            ) : i === 2 ? (
-                              <Medal className="h-4 w-4 text-amber-700" />
-                            ) : (
-                              <span className="pl-1">{i + 1}</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium text-sm">{entry.strategy_name}</div>
-                          <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                            {entry.description}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-bold">
-                          {entry.best_exact_match.toFixed(1)}%
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {entry.avg_exact_match.toFixed(1)}%
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {entry.avg_within_1.toFixed(1)}%
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {entry.avg_mae.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${entry.avg_cost_usd.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {entry.times_tested}x
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-
-            {/* Improvement Timeline */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                  Improvement Over Time
-                </CardTitle>
-                <CardDescription>
-                  Best exact match per session
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {timeline.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={timeline.map(t => ({
-                      session: t.session_number ? `#${t.session_number}` : new Date(t.created_at).toLocaleDateString(),
-                      best_exact: t.best_exact_match,
-                      experiments: t.experiments_run,
-                      spent: t.spent_usd,
-                    }))}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis dataKey="session" tick={{ fontSize: 11 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (!active || !payload?.length) return null;
-                          const d = payload[0].payload as { session: string; best_exact: number; experiments: number; spent: number };
-                          return (
-                            <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
-                              <div className="font-medium">Session {d.session}</div>
-                              <div>Best: {d.best_exact.toFixed(1)}%</div>
-                              <div>{d.experiments} experiments</div>
-                              <div>Spent: ${d.spent.toFixed(2)}</div>
-                            </div>
-                          );
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="best_exact"
-                        name="Best Exact %"
-                        stroke="hsl(var(--chart-1))"
-                        strokeWidth={2}
-                        dot={{ fill: "hsl(var(--chart-1))", r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    Complete sessions to see trends
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Section 1: Session Control */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="h-4 w-4" />
-              Research Session
-              {activeSession?.session_number && (
-                <Badge variant="outline" className="ml-1 text-xs">
-                  #{activeSession.session_number}
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList>
+            <TabsTrigger value="session">
+              {isRunning && (
+                <span className="relative flex h-2 w-2 mr-1">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
+                </span>
+              )}
+              Current Session
+            </TabsTrigger>
+            <TabsTrigger value="leaderboard">
+              <Medal className="h-3.5 w-3.5 mr-1" />
+              Leaderboard
+              {leaderboard.length > 0 && (
+                <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px]">
+                  {leaderboard.length}
                 </Badge>
               )}
-            </CardTitle>
-            <CardDescription className="flex items-center gap-2">
-              <span>
-                The agent will test multiple marking strategies and find the most
-                accurate one within your budget.
-              </span>
-              {activeSession?.parent_session_id && (
-                <Badge variant="secondary" className="gap-1 text-xs shrink-0">
-                  <Sparkles className="h-3 w-3" />
-                  Building on prior findings
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              <Clock className="h-3.5 w-3.5 mr-1" />
+              History
+              {sessions.length > 0 && (
+                <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px]">
+                  {sessions.length}
                 </Badge>
               )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isRunning ? (
-              // Running state
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
-                      {currentProgress ? (
-                        <>
-                          Experiment {activeSession.experiments_run + 1} — Evaluating row{" "}
-                          {currentProgress.rows_completed}/{currentProgress.rows_total}
-                        </>
-                      ) : (
-                        <>Experiment {activeSession.experiments_run + 1} — Starting...</>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Model: {activeSession.model} | Sample: {activeSession.sample_size} rows
-                    </div>
-                  </div>
-                  <Button variant="destructive" size="sm" onClick={handleStop}>
-                    <Square className="mr-1.5 h-3.5 w-3.5" />
-                    Stop
-                  </Button>
-                </div>
+            </TabsTrigger>
+          </TabsList>
 
-                {/* Row-level progress */}
-                {currentProgress && currentProgress.rows_total > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Evaluation progress</span>
-                      <span>
-                        {currentProgress.rows_completed}/{currentProgress.rows_total} rows
-                      </span>
-                    </div>
-                    <Progress
-                      value={(currentProgress.rows_completed / currentProgress.rows_total) * 100}
-                      className="h-1.5"
-                    />
-                  </div>
-                )}
-
-                {/* Budget progress */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-sm">
-                    <span>Budget</span>
-                    <span className="font-medium">
-                      ${activeSession.spent_usd.toFixed(2)} / ${activeSession.budget_usd.toFixed(2)}
+          {/* ===== TAB: Current Session ===== */}
+          <TabsContent value="session">
+            <div className="space-y-6">
+              {/* Session Control */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-4 w-4" />
+                    Research Session
+                    {activeSession?.session_number && (
+                      <Badge variant="outline" className="ml-1 text-xs">
+                        #{activeSession.session_number}
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="flex items-center gap-2">
+                    <span>
+                      The agent will test multiple marking strategies and find the most
+                      accurate one within your budget.
                     </span>
-                  </div>
-                  <Progress
-                    value={(activeSession.spent_usd / activeSession.budget_usd) * 100}
-                    className="h-2"
-                  />
-                </div>
-              </div>
-            ) : (
-              // Config + start state
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="budget">Budget ($)</Label>
-                    <Input
-                      id="budget"
-                      type="number"
-                      min={1}
-                      max={50}
-                      value={budget}
-                      onChange={(e) => setBudget(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="sample">Sample Size</Label>
-                    <Input
-                      id="sample"
-                      type="number"
-                      min={10}
-                      max={214}
-                      value={sampleSize}
-                      onChange={(e) => setSampleSize(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Model</Label>
-                    <Select value={model} onValueChange={setModel}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                        <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                        <SelectItem value="gemini-3.1-pro-preview">Gemini 3.1 Pro</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Button onClick={handleStart} disabled={starting} className="w-full">
-                  {starting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="mr-2 h-4 w-4" />
-                  )}
-                  Start Research Session
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Section 2: Experiment Log */}
-        {(experiments.length > 0 || (isRunning && currentProgress)) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>Experiment Log</span>
-                <Badge variant="secondary">
-                  {experiments.length} experiment{experiments.length !== 1 ? "s" : ""}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">#</TableHead>
-                    <TableHead>Strategy</TableHead>
-                    <TableHead className="text-right">Exact %</TableHead>
-                    <TableHead className="text-right">Within 1</TableHead>
-                    <TableHead className="text-right">MAE</TableHead>
-                    <TableHead className="text-right">Bias</TableHead>
-                    <TableHead className="text-right">Cost</TableHead>
-                    <TableHead className="text-center">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {experiments.map((exp, i) => {
-                    const isBest =
-                      exp.kept &&
-                      exp.exact_match === activeSession?.best_exact_match;
-                    const isExpanded = expandedExperiment === exp.id;
-                    return (
-                      <>
-                        <TableRow
-                          key={exp.id}
-                          className={`cursor-pointer transition-colors ${
-                            exp.kept
-                              ? "bg-emerald-500/5 hover:bg-emerald-500/10"
-                              : "opacity-60 hover:opacity-80"
-                          }`}
-                          onClick={() =>
-                            setExpandedExperiment(isExpanded ? null : exp.id)
-                          }
-                        >
-                          <TableCell className="font-mono text-xs">
-                            <div className="flex items-center gap-1">
-                              {isExpanded ? (
-                                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                              )}
-                              {i + 1}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {isBest && (
-                                <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                              )}
-                              <div>
-                                <div className="font-medium text-sm">
-                                  {exp.description}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {exp.strategy_name}
-                                </div>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {exp.exact_match != null
-                              ? `${exp.exact_match.toFixed(1)}%`
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {exp.within_1 != null
-                              ? `${exp.within_1.toFixed(1)}%`
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {exp.mae != null ? exp.mae.toFixed(2) : "-"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {exp.bias != null
-                              ? `${exp.bias >= 0 ? "+" : ""}${exp.bias.toFixed(2)}`
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            ${exp.cost_usd.toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {exp.kept ? (
-                              <Badge
-                                variant="outline"
-                                className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                              >
-                                <Check className="mr-1 h-3 w-3" />
-                                Kept
-                              </Badge>
+                    {activeSession?.parent_session_id && (
+                      <Badge variant="secondary" className="gap-1 text-xs shrink-0">
+                        <Sparkles className="h-3 w-3" />
+                        Building on prior findings
+                      </Badge>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isRunning ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                            {currentProgress ? (
+                              <>
+                                Experiment {activeSession.experiments_run + 1} — Evaluating row{" "}
+                                {currentProgress.rows_completed}/{currentProgress.rows_total}
+                              </>
                             ) : (
-                              <Badge variant="outline" className="text-muted-foreground">
-                                <X className="mr-1 h-3 w-3" />
-                                Discarded
-                              </Badge>
+                              <>Experiment {activeSession.experiments_run + 1} — Starting...</>
                             )}
-                          </TableCell>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Model: {activeSession.model} | Sample: {activeSession.sample_size} rows
+                          </div>
+                        </div>
+                        <Button variant="destructive" size="sm" onClick={handleStop}>
+                          <Square className="mr-1.5 h-3.5 w-3.5" />
+                          Stop
+                        </Button>
+                      </div>
+
+                      {currentProgress && currentProgress.rows_total > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Evaluation progress</span>
+                            <span>
+                              {currentProgress.rows_completed}/{currentProgress.rows_total} rows
+                            </span>
+                          </div>
+                          <Progress
+                            value={(currentProgress.rows_completed / currentProgress.rows_total) * 100}
+                            className="h-1.5"
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-sm">
+                          <span>Budget</span>
+                          <span className="font-medium">
+                            ${activeSession.spent_usd.toFixed(2)} / ${activeSession.budget_usd.toFixed(2)}
+                          </span>
+                        </div>
+                        <Progress
+                          value={(activeSession.spent_usd / activeSession.budget_usd) * 100}
+                          className="h-2"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="budget">Budget ($)</Label>
+                          <Input
+                            id="budget"
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={budget}
+                            onChange={(e) => setBudget(Number(e.target.value))}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="sample">Sample Size</Label>
+                          <Input
+                            id="sample"
+                            type="number"
+                            min={10}
+                            max={214}
+                            value={sampleSize}
+                            onChange={(e) => setSampleSize(Number(e.target.value))}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Model</Label>
+                          <Select value={model} onValueChange={setModel}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                              <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                              <SelectItem value="gemini-3.1-pro-preview">Gemini 3.1 Pro</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <Button onClick={handleStart} disabled={starting} className="w-full">
+                        {starting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Start Research Session
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Experiment Log */}
+              {(experiments.length > 0 || (isRunning && currentProgress)) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Experiment Log</span>
+                      <Badge variant="secondary">
+                        {experiments.length} experiment{experiments.length !== 1 ? "s" : ""}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10">#</TableHead>
+                          <TableHead>Strategy</TableHead>
+                          <TableHead className="text-right">Exact %</TableHead>
+                          <TableHead className="text-right">Within 1</TableHead>
+                          <TableHead className="text-right">MAE</TableHead>
+                          <TableHead className="text-right">Bias</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead className="text-center">Status</TableHead>
                         </TableRow>
-
-                        {/* Expanded detail row */}
-                        {isExpanded && (
-                          <TableRow key={`${exp.id}-detail`}>
-                            <TableCell colSpan={8} className="bg-muted/30 p-4">
-                              <div className="space-y-4">
-                                {/* System Prompt */}
-                                <div>
-                                  <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
-                                    System Prompt
-                                  </h4>
-                                  {exp.prompt_text ? (
-                                    <pre className="whitespace-pre-wrap text-xs bg-background border rounded-md p-3 max-h-48 overflow-y-auto font-mono">
-                                      {exp.prompt_text}
-                                    </pre>
+                      </TableHeader>
+                      <TableBody>
+                        {experiments.map((exp, i) => {
+                          const isBest =
+                            exp.kept &&
+                            exp.exact_match === activeSession?.best_exact_match;
+                          const isExpanded = expandedExperiment === exp.id;
+                          return (
+                            <>
+                              <TableRow
+                                key={exp.id}
+                                className={`cursor-pointer transition-colors ${
+                                  exp.kept
+                                    ? "bg-emerald-500/5 hover:bg-emerald-500/10"
+                                    : "opacity-60 hover:opacity-80"
+                                }`}
+                                onClick={() =>
+                                  setExpandedExperiment(isExpanded ? null : exp.id)
+                                }
+                              >
+                                <TableCell className="font-mono text-xs">
+                                  <div className="flex items-center gap-1">
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                                    )}
+                                    {i + 1}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    {isBest && (
+                                      <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                                    )}
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {exp.description}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {exp.strategy_name}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {exp.exact_match != null
+                                    ? `${exp.exact_match.toFixed(1)}%`
+                                    : "-"}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {exp.within_1 != null
+                                    ? `${exp.within_1.toFixed(1)}%`
+                                    : "-"}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {exp.mae != null ? exp.mae.toFixed(2) : "-"}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {exp.bias != null
+                                    ? `${exp.bias >= 0 ? "+" : ""}${exp.bias.toFixed(2)}`
+                                    : "-"}
+                                </TableCell>
+                                <TableCell className="text-right font-mono">
+                                  ${exp.cost_usd.toFixed(2)}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {exp.kept ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    >
+                                      <Check className="mr-1 h-3 w-3" />
+                                      Kept
+                                    </Badge>
                                   ) : (
-                                    <p className="text-xs text-muted-foreground italic">
-                                      Prompt text not recorded for this experiment
-                                    </p>
+                                    <Badge variant="outline" className="text-muted-foreground">
+                                      <X className="mr-1 h-3 w-3" />
+                                      Discarded
+                                    </Badge>
                                   )}
-                                </div>
+                                </TableCell>
+                              </TableRow>
 
-                                {/* Config */}
-                                {exp.config_json && (
-                                  <div>
-                                    <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
-                                      Configuration
-                                    </h4>
-                                    <div className="flex flex-wrap gap-2">
-                                      {Object.entries(
-                                        JSON.parse(exp.config_json) as Record<string, unknown>
-                                      ).map(([key, val]) => (
-                                        <Badge key={key} variant="secondary" className="text-xs font-mono">
-                                          {key}: {String(val)}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
+                              {isExpanded && (
+                                <TableRow key={`${exp.id}-detail`}>
+                                  <TableCell colSpan={8} className="bg-muted/30 p-4">
+                                    <div className="space-y-4">
+                                      <div>
+                                        <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                          System Prompt
+                                        </h4>
+                                        {exp.prompt_text ? (
+                                          <pre className="whitespace-pre-wrap text-xs bg-background border rounded-md p-3 max-h-48 overflow-y-auto font-mono">
+                                            {exp.prompt_text}
+                                          </pre>
+                                        ) : (
+                                          <p className="text-xs text-muted-foreground italic">
+                                            Prompt text not recorded for this experiment
+                                          </p>
+                                        )}
+                                      </div>
 
-                                {/* Per-question breakdown for this experiment */}
-                                {exp.per_question && (
-                                  <div>
-                                    <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
-                                      Per-Question Breakdown
-                                    </h4>
-                                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                                      {Object.entries(exp.per_question)
-                                        .sort(([a], [b]) => a.localeCompare(b))
-                                        .map(([qn, m]) => (
-                                          <div
-                                            key={qn}
-                                            className="rounded-md border bg-background p-2 text-center"
-                                          >
-                                            <div className="text-[10px] text-muted-foreground">
-                                              {qn.replace("Question ", "Q")}
-                                            </div>
-                                            <div className="text-sm font-bold">
-                                              {m.exact_match.toFixed(0)}%
-                                            </div>
-                                            <div className="text-[10px] text-muted-foreground">
-                                              W/in 1: {m.within_1 != null ? `${m.within_1.toFixed(0)}%` : "N/A"}
-                                            </div>
+                                      {exp.config_json && (
+                                        <div>
+                                          <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                            Configuration
+                                          </h4>
+                                          <div className="flex flex-wrap gap-2">
+                                            {Object.entries(
+                                              JSON.parse(exp.config_json) as Record<string, unknown>
+                                            ).map(([key, val]) => (
+                                              <Badge key={key} variant="secondary" className="text-xs font-mono">
+                                                {key}: {String(val)}
+                                              </Badge>
+                                            ))}
                                           </div>
-                                        ))}
+                                        </div>
+                                      )}
+
+                                      {exp.per_question && (
+                                        <div>
+                                          <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                            Per-Question Breakdown
+                                          </h4>
+                                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                            {Object.entries(exp.per_question)
+                                              .sort(([a], [b]) => a.localeCompare(b))
+                                              .map(([qn, m]) => (
+                                                <div
+                                                  key={qn}
+                                                  className="rounded-md border bg-background p-2 text-center"
+                                                >
+                                                  <div className="text-[10px] text-muted-foreground">
+                                                    {qn.replace("Question ", "Q")}
+                                                  </div>
+                                                  <div className="text-sm font-bold">
+                                                    {m.exact_match.toFixed(0)}%
+                                                  </div>
+                                                  <div className="text-[10px] text-muted-foreground">
+                                                    W/in 1: {m.within_1 != null ? `${m.within_1.toFixed(0)}%` : "N/A"}
+                                                  </div>
+                                                </div>
+                                              ))}
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </>
+                          );
+                        })}
+
+                        {isRunning && currentProgress && (
+                          <TableRow className="bg-violet-500/5">
+                            <TableCell className="font-mono text-xs">
+                              {experiments.length + 1}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                                <div>
+                                  <div className="text-sm font-medium text-muted-foreground">
+                                    Running...
                                   </div>
-                                )}
+                                  <div className="text-xs text-muted-foreground">
+                                    {currentProgress.rows_completed}/{currentProgress.rows_total} rows evaluated
+                                  </div>
+                                </div>
                               </div>
+                            </TableCell>
+                            <TableCell colSpan={6}>
+                              <Progress
+                                value={
+                                  (currentProgress.rows_completed / currentProgress.rows_total) * 100
+                                }
+                                className="h-1.5"
+                              />
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
-                    );
-                  })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
 
-                  {/* Running experiment placeholder row */}
-                  {isRunning && currentProgress && (
-                    <TableRow className="bg-violet-500/5">
-                      <TableCell className="font-mono text-xs">
-                        {experiments.length + 1}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
-                          <div>
-                            <div className="text-sm font-medium text-muted-foreground">
-                              Running...
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {currentProgress.rows_completed}/{currentProgress.rows_total} rows evaluated
-                            </div>
+              {/* Best Strategy + Per-Question Chart */}
+              {bestExperiment && (
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Card className="border-amber-500/30">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Trophy className="h-5 w-5 text-amber-500" />
+                        Best Strategy
+                      </CardTitle>
+                      <CardDescription>{bestExperiment.description}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Exact Match</div>
+                          <div className="text-2xl font-bold">
+                            {bestExperiment.exact_match?.toFixed(1)}%
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell colSpan={6}>
-                        <Progress
-                          value={
-                            (currentProgress.rows_completed / currentProgress.rows_total) * 100
-                          }
-                          className="h-1.5"
-                        />
-                      </TableCell>
-                    </TableRow>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Within 1 Mark</div>
+                          <div className="text-2xl font-bold">
+                            {bestExperiment.within_1?.toFixed(1)}%
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">MAE</div>
+                          <div className="text-2xl font-bold">
+                            {bestExperiment.mae?.toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Bias</div>
+                          <div className="text-2xl font-bold">
+                            {bestExperiment.bias != null
+                              ? `${bestExperiment.bias >= 0 ? "+" : ""}${bestExperiment.bias.toFixed(2)}`
+                              : "-"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                        <DollarSign className="h-3 w-3" />
+                        Cost: ${bestExperiment.cost_usd.toFixed(2)} | {bestExperiment.n} rows evaluated
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {perQuestionData.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">
+                          Per-Question Accuracy (Best Strategy)
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={perQuestionData}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                            <XAxis
+                              dataKey="question"
+                              className="text-xs"
+                              tick={{ fontSize: 11 }}
+                            />
+                            <YAxis
+                              domain={[0, 100]}
+                              className="text-xs"
+                              tick={{ fontSize: 11 }}
+                            />
+                            <Tooltip
+                              content={({ active, payload }) => {
+                                if (!active || !payload?.length) return null;
+                                const d = payload[0].payload;
+                                return (
+                                  <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
+                                    <div className="font-medium">{d.question}</div>
+                                    <div>Exact: {d.exact_match.toFixed(1)}%</div>
+                                    <div>Within 1: {d.within_1.toFixed(1)}%</div>
+                                    <div>MAE: {d.mae.toFixed(2)}</div>
+                                    <div>n={d.n}</div>
+                                  </div>
+                                );
+                              }}
+                            />
+                            <Legend
+                              wrapperStyle={{ fontSize: "11px" }}
+                            />
+                            <Bar
+                              dataKey="exact_match"
+                              name="Exact Match"
+                              fill="hsl(var(--chart-1))"
+                              radius={[4, 4, 0, 0]}
+                            />
+                            <Bar
+                              dataKey="within_1"
+                              name="Within 1 Mark"
+                              fill="hsl(var(--chart-2))"
+                              radius={[4, 4, 0, 0]}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
                   )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Section 3: Best Strategy + Per-Question Chart */}
-        {bestExperiment && (
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Best strategy card */}
-            <Card className="border-amber-500/30">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-amber-500" />
-                  Best Strategy
-                </CardTitle>
-                <CardDescription>{bestExperiment.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Exact Match</div>
-                    <div className="text-2xl font-bold">
-                      {bestExperiment.exact_match?.toFixed(1)}%
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Within 1 Mark</div>
-                    <div className="text-2xl font-bold">
-                      {bestExperiment.within_1?.toFixed(1)}%
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">MAE</div>
-                    <div className="text-2xl font-bold">
-                      {bestExperiment.mae?.toFixed(2)}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Bias</div>
-                    <div className="text-2xl font-bold">
-                      {bestExperiment.bias != null
-                        ? `${bestExperiment.bias >= 0 ? "+" : ""}${bestExperiment.bias.toFixed(2)}`
-                        : "-"}
-                    </div>
-                  </div>
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-                  <DollarSign className="h-3 w-3" />
-                  Cost: ${bestExperiment.cost_usd.toFixed(2)} | {bestExperiment.n} rows evaluated
-                </div>
-              </CardContent>
-            </Card>
+              )}
 
-            {/* Per-question breakdown — grouped bar chart */}
-            {perQuestionData.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Per-Question Accuracy (Best Strategy)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={perQuestionData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis
-                        dataKey="question"
-                        className="text-xs"
-                        tick={{ fontSize: 11 }}
-                      />
-                      <YAxis
-                        domain={[0, 100]}
-                        className="text-xs"
-                        tick={{ fontSize: 11 }}
-                      />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (!active || !payload?.length) return null;
-                          const d = payload[0].payload;
-                          return (
-                            <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
-                              <div className="font-medium">{d.question}</div>
-                              <div>Exact: {d.exact_match.toFixed(1)}%</div>
-                              <div>Within 1: {d.within_1.toFixed(1)}%</div>
-                              <div>MAE: {d.mae.toFixed(2)}</div>
-                              <div>n={d.n}</div>
+              {/* Start Next Session CTA */}
+              {isCompleted && !isRunning && (
+                <Card className="border-violet-500/30 bg-violet-500/5">
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Sparkles className="h-5 w-5 text-violet-500" />
+                        <div>
+                          <div className="font-medium text-sm">Ready for next session</div>
+                          <div className="text-xs text-muted-foreground">
+                            The next session will build on findings from Session #{activeSession?.session_number ?? "?"} —
+                            testing variations of winners, untested strategies, and novel hybrids.
+                          </div>
+                        </div>
+                      </div>
+                      <Button onClick={handleStart} disabled={starting} size="sm">
+                        {starting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Start Next Session
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ===== TAB: Leaderboard ===== */}
+          <TabsContent value="leaderboard">
+            <div className="space-y-6">
+              {leaderboard.length > 0 ? (
+                <>
+                  {/* All-Time Leaderboard */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Medal className="h-5 w-5 text-amber-500" />
+                        All-Time Strategy Leaderboard
+                      </CardTitle>
+                      <CardDescription>
+                        Cross-session rankings — best strategies across all research sessions
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-10">#</TableHead>
+                            <TableHead>Strategy</TableHead>
+                            <TableHead className="text-right">Best Exact%</TableHead>
+                            <TableHead className="text-right">Avg Exact%</TableHead>
+                            <TableHead className="text-right">Avg W/in 1%</TableHead>
+                            <TableHead className="text-right">Avg MAE</TableHead>
+                            <TableHead className="text-right">Avg Cost</TableHead>
+                            <TableHead className="text-right">Tested</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {leaderboard.map((entry, i) => (
+                            <TableRow
+                              key={entry.strategy_name}
+                              className={i === 0 ? "bg-amber-500/5" : i < 3 ? "bg-muted/30" : ""}
+                            >
+                              <TableCell className="font-mono text-xs">
+                                <div className="flex items-center gap-1">
+                                  {i === 0 ? (
+                                    <Trophy className="h-4 w-4 text-amber-500" />
+                                  ) : i === 1 ? (
+                                    <Medal className="h-4 w-4 text-slate-400" />
+                                  ) : i === 2 ? (
+                                    <Medal className="h-4 w-4 text-amber-700" />
+                                  ) : (
+                                    <span className="pl-1">{i + 1}</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-sm">{entry.strategy_name}</div>
+                                <div className="text-xs text-muted-foreground truncate max-w-[300px]">
+                                  {entry.description}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-mono font-bold">
+                                {entry.best_exact_match.toFixed(1)}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {entry.avg_exact_match.toFixed(1)}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {entry.avg_within_1.toFixed(1)}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {entry.avg_mae.toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                ${entry.avg_cost_usd.toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {entry.times_tested}x
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  {/* Improvement Timeline */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5 text-emerald-500" />
+                        Improvement Over Time
+                      </CardTitle>
+                      <CardDescription>
+                        Best exact match achieved per session — tracking convergence toward optimal strategy
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {timeline.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={280}>
+                          <LineChart data={timeline.map(t => ({
+                            session: t.session_number ? `Session #${t.session_number}` : new Date(t.created_at).toLocaleDateString(),
+                            best_exact: t.best_exact_match,
+                            experiments: t.experiments_run,
+                            spent: t.spent_usd,
+                          }))}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                            <XAxis dataKey="session" tick={{ fontSize: 11 }} />
+                            <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                            <Tooltip
+                              content={({ active, payload }) => {
+                                if (!active || !payload?.length) return null;
+                                const d = payload[0].payload as { session: string; best_exact: number; experiments: number; spent: number };
+                                return (
+                                  <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
+                                    <div className="font-medium">{d.session}</div>
+                                    <div>Best: {d.best_exact.toFixed(1)}%</div>
+                                    <div>{d.experiments} experiments</div>
+                                    <div>Spent: ${d.spent.toFixed(2)}</div>
+                                  </div>
+                                );
+                              }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="best_exact"
+                              name="Best Exact %"
+                              stroke="hsl(var(--chart-1))"
+                              strokeWidth={2}
+                              dot={{ fill: "hsl(var(--chart-1))", r: 5 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          Complete sessions to see trends
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Medal className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      No strategies tested yet. Run your first research session to populate the leaderboard.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ===== TAB: History ===== */}
+          <TabsContent value="history">
+            <div className="space-y-6">
+              {sessions.length > 0 ? (
+                <>
+                  {/* Session List */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">All Sessions</CardTitle>
+                      <CardDescription>
+                        Click a session to view its experiments and report
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {sessions.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => handleViewSession(s.id)}
+                            className={`flex w-full items-center justify-between rounded-md border p-3 text-left text-sm transition-colors hover:bg-accent ${
+                              activeSession?.id === s.id ? "border-primary bg-accent" : ""
+                            }`}
+                          >
+                            <div>
+                              <div className="font-medium">
+                                {s.session_number ? `Session #${s.session_number} — ` : ""}
+                                {new Date(s.created_at).toLocaleDateString()} —{" "}
+                                {s.experiments_run} experiments
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Best: {s.best_exact_match.toFixed(1)}% | Spent: $
+                                {s.spent_usd.toFixed(2)} / ${s.budget_usd.toFixed(2)}
+                                {s.model ? ` | ${s.model}` : ""}
+                              </div>
                             </div>
-                          );
-                        }}
-                      />
-                      <Legend
-                        wrapperStyle={{ fontSize: "11px" }}
-                      />
-                      <Bar
-                        dataKey="exact_match"
-                        name="Exact Match"
-                        fill="hsl(var(--chart-1))"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="within_1"
-                        name="Within 1 Mark"
-                        fill="hsl(var(--chart-2))"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
+                            <Badge
+                              variant={
+                                s.status === "running"
+                                  ? "default"
+                                  : s.status === "completed"
+                                    ? "secondary"
+                                    : "destructive"
+                              }
+                            >
+                              {s.status}
+                            </Badge>
+                          </button>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
 
-        {/* Section 4: Session Report */}
-        {isCompleted && activeSession?.report_md && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-violet-500" />
-                Session Report
-              </CardTitle>
-              <CardDescription>
-                Automated analysis of all strategies tested in this session
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReportRenderer markdown={activeSession.report_md} />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Start Next Session button after report */}
-        {isCompleted && !isRunning && (
-          <Card className="border-violet-500/30 bg-violet-500/5">
-            <CardContent className="py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Sparkles className="h-5 w-5 text-violet-500" />
-                  <div>
-                    <div className="font-medium text-sm">Ready for next session</div>
-                    <div className="text-xs text-muted-foreground">
-                      The next session will build on findings from Session #{activeSession?.session_number ?? "?"} —
-                      testing variations of winners, untested strategies, and novel hybrids.
-                    </div>
-                  </div>
-                </div>
-                <Button onClick={handleStart} disabled={starting} size="sm">
-                  {starting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="mr-2 h-4 w-4" />
+                  {/* Session Report for selected session */}
+                  {activeSession?.report_md && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-violet-500" />
+                          Session Report
+                          {activeSession.session_number && (
+                            <Badge variant="outline" className="ml-1 text-xs">
+                              #{activeSession.session_number}
+                            </Badge>
+                          )}
+                        </CardTitle>
+                        <CardDescription>
+                          Automated analysis of all strategies tested in this session
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                          <ReportRenderer markdown={activeSession.report_md} />
+                        </div>
+                      </CardContent>
+                    </Card>
                   )}
-                  Start Next Session
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Session History */}
-        {sessions.length > 1 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Session History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {sessions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => loadSessionDetail(s.id)}
-                    className={`flex w-full items-center justify-between rounded-md border p-3 text-left text-sm transition-colors hover:bg-accent ${
-                      activeSession?.id === s.id ? "border-primary bg-accent" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="font-medium">
-                        {s.session_number ? `Session #${s.session_number} — ` : ""}
-                        {new Date(s.created_at).toLocaleDateString()} —{" "}
-                        {s.experiments_run} experiments
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Best: {s.best_exact_match.toFixed(1)}% | Spent: $
-                        {s.spent_usd.toFixed(2)} / ${s.budget_usd.toFixed(2)}
-                      </div>
-                    </div>
-                    <Badge
-                      variant={
-                        s.status === "running"
-                          ? "default"
-                          : s.status === "completed"
-                            ? "secondary"
-                            : "destructive"
-                      }
-                    >
-                      {s.status}
-                    </Badge>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Clock className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      No sessions yet. Start your first research session from the Current Session tab.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </AppShell>
   );
