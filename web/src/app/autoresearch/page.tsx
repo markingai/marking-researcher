@@ -37,6 +37,9 @@ import {
   ChevronRight,
   ChevronDown,
   FileText,
+  Medal,
+  TrendingUp,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -45,12 +48,18 @@ import {
   getAutoresearchSession,
   stopAutoresearchSession,
   subscribeToAutoresearchEvents,
+  getAutoresearchLeaderboard,
+  getAutoresearchTimeline,
   type AutoresearchSession,
   type AutoresearchExperiment,
+  type LeaderboardEntry,
+  type TimelineEntry,
 } from "@/lib/api";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -66,6 +75,8 @@ export default function AutoresearchPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [expandedExperiment, setExpandedExperiment] = useState<string | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
 
   // Progress tracking
   const [currentProgress, setCurrentProgress] = useState<{
@@ -81,9 +92,10 @@ export default function AutoresearchPage() {
 
   const cleanupRef = useRef<(() => void) | null>(null);
 
-  // Load sessions on mount
+  // Load sessions + leaderboard on mount
   useEffect(() => {
     loadSessions();
+    loadLeaderboard();
   }, []);
 
   const loadSessions = async () => {
@@ -102,6 +114,19 @@ export default function AutoresearchPage() {
       // First time — no sessions yet
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLeaderboard = async () => {
+    try {
+      const [lb, tl] = await Promise.all([
+        getAutoresearchLeaderboard(),
+        getAutoresearchTimeline(),
+      ]);
+      setLeaderboard(lb);
+      setTimeline(tl);
+    } catch {
+      // No data yet
     }
   };
 
@@ -190,6 +215,7 @@ export default function AutoresearchPage() {
               }
             : prev,
         );
+        loadLeaderboard();
         toast.success("Research session completed!");
       } else if (event === "error") {
         setCurrentProgress(null);
@@ -229,6 +255,8 @@ export default function AutoresearchPage() {
         created_at: new Date().toISOString(),
         completed_at: null,
         report_md: null,
+        session_number: (sessions.length > 0 ? Math.max(...sessions.map(s => s.session_number ?? 0)) + 1 : 1),
+        parent_session_id: null,
       };
       setActiveSession(newSession);
       setExperiments([]);
@@ -312,16 +340,164 @@ export default function AutoresearchPage() {
           </Badge>
         </div>
 
+        {/* Leaderboard + Timeline */}
+        {leaderboard.length > 0 && (
+          <div className="grid gap-6 md:grid-cols-3">
+            {/* All-Time Leaderboard */}
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Medal className="h-5 w-5 text-amber-500" />
+                  All-Time Strategy Leaderboard
+                </CardTitle>
+                <CardDescription>
+                  Cross-session rankings — best strategies across all research sessions
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">#</TableHead>
+                      <TableHead>Strategy</TableHead>
+                      <TableHead className="text-right">Best Exact%</TableHead>
+                      <TableHead className="text-right">Avg Exact%</TableHead>
+                      <TableHead className="text-right">Avg W/in 1%</TableHead>
+                      <TableHead className="text-right">Avg MAE</TableHead>
+                      <TableHead className="text-right">Avg Cost</TableHead>
+                      <TableHead className="text-right">Tested</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {leaderboard.map((entry, i) => (
+                      <TableRow
+                        key={entry.strategy_name}
+                        className={i === 0 ? "bg-amber-500/5" : i < 3 ? "bg-muted/30" : ""}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          <div className="flex items-center gap-1">
+                            {i === 0 ? (
+                              <Trophy className="h-4 w-4 text-amber-500" />
+                            ) : i === 1 ? (
+                              <Medal className="h-4 w-4 text-slate-400" />
+                            ) : i === 2 ? (
+                              <Medal className="h-4 w-4 text-amber-700" />
+                            ) : (
+                              <span className="pl-1">{i + 1}</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium text-sm">{entry.strategy_name}</div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                            {entry.description}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-bold">
+                          {entry.best_exact_match.toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {entry.avg_exact_match.toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {entry.avg_within_1.toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {entry.avg_mae.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          ${entry.avg_cost_usd.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {entry.times_tested}x
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Improvement Timeline */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <TrendingUp className="h-4 w-4 text-emerald-500" />
+                  Improvement Over Time
+                </CardTitle>
+                <CardDescription>
+                  Best exact match per session
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {timeline.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={timeline.map(t => ({
+                      session: t.session_number ? `#${t.session_number}` : new Date(t.created_at).toLocaleDateString(),
+                      best_exact: t.best_exact_match,
+                      experiments: t.experiments_run,
+                      spent: t.spent_usd,
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis dataKey="session" tick={{ fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0].payload as { session: string; best_exact: number; experiments: number; spent: number };
+                          return (
+                            <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
+                              <div className="font-medium">Session {d.session}</div>
+                              <div>Best: {d.best_exact.toFixed(1)}%</div>
+                              <div>{d.experiments} experiments</div>
+                              <div>Spent: ${d.spent.toFixed(2)}</div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="best_exact"
+                        name="Best Exact %"
+                        stroke="hsl(var(--chart-1))"
+                        strokeWidth={2}
+                        dot={{ fill: "hsl(var(--chart-1))", r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    Complete sessions to see trends
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* Section 1: Session Control */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Zap className="h-4 w-4" />
               Research Session
+              {activeSession?.session_number && (
+                <Badge variant="outline" className="ml-1 text-xs">
+                  #{activeSession.session_number}
+                </Badge>
+              )}
             </CardTitle>
-            <CardDescription>
-              The agent will test multiple marking strategies and find the most
-              accurate one within your budget.
+            <CardDescription className="flex items-center gap-2">
+              <span>
+                The agent will test multiple marking strategies and find the most
+                accurate one within your budget.
+              </span>
+              {activeSession?.parent_session_id && (
+                <Badge variant="secondary" className="gap-1 text-xs shrink-0">
+                  <Sparkles className="h-3 w-3" />
+                  Building on prior findings
+                </Badge>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -416,6 +592,7 @@ export default function AutoresearchPage() {
                       <SelectContent>
                         <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
                         <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                        <SelectItem value="gemini-3.1-pro-preview">Gemini 3.1 Pro</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -779,6 +956,34 @@ export default function AutoresearchPage() {
           </Card>
         )}
 
+        {/* Start Next Session button after report */}
+        {isCompleted && !isRunning && (
+          <Card className="border-violet-500/30 bg-violet-500/5">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-violet-500" />
+                  <div>
+                    <div className="font-medium text-sm">Ready for next session</div>
+                    <div className="text-xs text-muted-foreground">
+                      The next session will build on findings from Session #{activeSession?.session_number ?? "?"} —
+                      testing variations of winners, untested strategies, and novel hybrids.
+                    </div>
+                  </div>
+                </div>
+                <Button onClick={handleStart} disabled={starting} size="sm">
+                  {starting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-2 h-4 w-4" />
+                  )}
+                  Start Next Session
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Session History */}
         {sessions.length > 1 && (
           <Card>
@@ -797,6 +1002,7 @@ export default function AutoresearchPage() {
                   >
                     <div>
                       <div className="font-medium">
+                        {s.session_number ? `Session #${s.session_number} — ` : ""}
                         {new Date(s.created_at).toLocaleDateString()} —{" "}
                         {s.experiments_run} experiments
                       </div>

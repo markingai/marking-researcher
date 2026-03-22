@@ -691,7 +691,167 @@ class AutoresearchManager:
                 lines.append(f"3. **Investigate weak questions** ({', '.join(weak_qs)}) — may benefit from question-specific prompts")
         lines.append(f"4. **Run validation** on the held-out test set ({session['sample_size']} rows) to confirm results generalize")
 
+        # Recommendations for next session
+        recs = self._generate_recommendations(session_id)
+        if recs:
+            lines.append("\n## Recommendations for Next Session\n")
+            lines.append("These recommendations will be automatically used by the next research session.\n")
+            lines.append("| Priority | Type | Strategy | Rationale |")
+            lines.append("|----------|------|----------|-----------|")
+            for rec in recs[:10]:  # Top 10
+                lines.append(
+                    f"| {rec['priority']} | {rec['type']} | "
+                    f"`{rec['strategy_name']}` | {rec['description']} |"
+                )
+
         return "\n".join(lines)
+
+    def _generate_recommendations(self, session_id: str) -> list[dict]:
+        """Generate concrete recommendations for the next session and save to DB."""
+        with database.get_db() as db:
+            # All experiments ever run
+            all_exps = db.execute(
+                "SELECT strategy_name, exact_match, bias, per_question_json, config_json "
+                "FROM autoresearch_experiments WHERE exact_match IS NOT NULL"
+            ).fetchall()
+
+            # This session's experiments
+            session_exps = db.execute(
+                "SELECT strategy_name, exact_match, within_1, bias, per_question_json, config_json "
+                "FROM autoresearch_experiments WHERE session_id=? AND exact_match IS NOT NULL "
+                "ORDER BY exact_match DESC",
+                (session_id,),
+            ).fetchall()
+
+        if not session_exps:
+            return []
+
+        all_tested_names = {e["strategy_name"] for e in all_exps}
+        best = session_exps[0]
+        recs = []
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Known strategies from codebase
+        CODEBASE_STRATEGIES = {
+            "english_scorecard": "Signal extraction removes LLM scoring bias — deterministic scoring",
+            "english_cascade": "Two-pass band→exact constrains scoring range",
+            "english_comparative_anchor": "Relative judgment vs exemplars reduces absolute scoring drift",
+            "english_forced_independence": "Anti-criterion-collapse guards improve scoring diversity",
+            "english_full_exemplars": "Full calibration essays anchor model expectations",
+            "english_level_descriptors": "Explicit rubric-level matching per criterion",
+            "english_halfmark_criterion": "Half-mark granularity for finer differentiation",
+            "english_moderated": "Two-pass with independent moderator reduces errors",
+            "english_panel": "3-marker voting reduces individual marker variance",
+            "english_dual_adjudicate": "Dual marking with adjudicator on disagreement",
+            "english_debate": "Multi-round debate converges on consensus mark",
+            "english_strict_range": "Score distribution calibration prevents range compression",
+        }
+
+        # 1. Untested strategies from codebase
+        for name, rationale in CODEBASE_STRATEGIES.items():
+            if name not in all_tested_names:
+                recs.append({
+                    "type": "untested",
+                    "strategy_name": name,
+                    "description": rationale,
+                    "priority": 20,
+                    "config_json": json.dumps({"source": "codebase"}),
+                })
+
+        # 2. Variations of top performers
+        for exp in session_exps[:3]:
+            config = {}
+            if exp["config_json"]:
+                try:
+                    config = json.loads(exp["config_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            tb = config.get("thinking_budget", 4096)
+            name = exp["strategy_name"]
+
+            # Higher thinking budget
+            high_think_name = f"{name}_high_think"
+            if tb < 8192 and high_think_name not in all_tested_names:
+                recs.append({
+                    "type": "variation",
+                    "strategy_name": high_think_name,
+                    "description": f"Run {name} with 8192 thinking budget (was {tb})",
+                    "priority": 30,
+                    "config_json": json.dumps({"parent": name, "thinking_budget": 8192}),
+                })
+
+            # Gemini 3.1 variant
+            g31_name = f"{name}_g31"
+            if g31_name not in all_tested_names:
+                recs.append({
+                    "type": "variation",
+                    "strategy_name": g31_name,
+                    "description": f"Run {name} on Gemini 3.1 Pro",
+                    "priority": 35,
+                    "config_json": json.dumps({"parent": name, "model": "gemini-3.1-pro-preview"}),
+                })
+
+        # 3. Bias correction
+        if best["bias"] is not None and abs(best["bias"]) > 0.3:
+            direction = "over-marks" if best["bias"] > 0 else "under-marks"
+            bc_name = f"{best['strategy_name']}_bias_corrected"
+            if bc_name not in all_tested_names:
+                recs.append({
+                    "type": "hybrid",
+                    "strategy_name": bc_name,
+                    "description": f"Best strategy {direction} by {abs(best['bias']):.2f} — add bias correction",
+                    "priority": 25,
+                    "config_json": json.dumps({"parent": best["strategy_name"], "bias": best["bias"]}),
+                })
+
+        # 4. Hybrid combinations
+        hybrids = [
+            ("cascade_conservative", "Cascade band classification + conservative exact scoring"),
+            ("criterion_forced_independence", "Criterion decomposition with anti-collapse guards"),
+            ("level_match_high_think", "Level matching with extended thinking (8192)"),
+            ("flash_ensemble_3x", "3x Flash ensemble for reduced variance"),
+        ]
+        for h_name, h_desc in hybrids:
+            if h_name not in all_tested_names:
+                recs.append({
+                    "type": "hybrid",
+                    "strategy_name": h_name,
+                    "description": h_desc,
+                    "priority": 40,
+                    "config_json": json.dumps({"hybrid": True}),
+                })
+
+        # 5. Question-specific analysis
+        if best["per_question_json"]:
+            try:
+                per_q = json.loads(best["per_question_json"])
+                weak_qs = [qn for qn, m in per_q.items() if m["exact_match"] < 15]
+                if weak_qs:
+                    recs.append({
+                        "type": "novel",
+                        "strategy_name": "question_router",
+                        "description": f"Route weak questions ({', '.join(weak_qs)}) to specialist prompts",
+                        "priority": 35,
+                        "config_json": json.dumps({"weak_questions": weak_qs}),
+                    })
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Save to DB
+        with database.get_db() as db:
+            for rec in recs:
+                rec_id = str(uuid.uuid4())
+                db.execute(
+                    """INSERT INTO autoresearch_recommendations
+                    (id, source_session_id, recommendation_type, strategy_name,
+                     description, config_json, priority, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (rec_id, session_id, rec["type"], rec["strategy_name"],
+                     rec["description"], rec["config_json"], rec["priority"], now),
+                )
+
+        return recs
 
     def _execute_session(
         self,
@@ -711,8 +871,12 @@ class AutoresearchManager:
             else:
                 eval_rows = dev_rows
 
-            # Build all recipe strategies
-            recipes = build_recipe_strategies(model)
+            # Build recipes — adaptive if prior data exists, else fixed
+            from .autoresearch_recipe_engine import build_adaptive_recipes
+            with database.get_db() as db:
+                recipes = build_adaptive_recipes(model, sample_size, budget_usd, db)
+            if not recipes:
+                recipes = build_recipe_strategies(model)
 
             total_spent = 0.0
             best_exact = 0.0
@@ -840,7 +1004,16 @@ class AutoresearchManager:
                     "budget_usd": budget_usd,
                 })
 
-            # Generate report
+            # Mark consumed recommendations (if this session used adaptive recipes)
+            with database.get_db() as db:
+                db.execute(
+                    """UPDATE autoresearch_recommendations
+                    SET consumed_by_session_id=?
+                    WHERE consumed_by_session_id IS NULL""",
+                    (ctx.session_id,),
+                )
+
+            # Generate report (includes recommendation generation)
             status = "stopped" if ctx.cancelled else "completed"
             report_md = self._generate_report(ctx.session_id)
 

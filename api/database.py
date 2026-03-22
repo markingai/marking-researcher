@@ -143,6 +143,22 @@ CREATE TABLE IF NOT EXISTS autoresearch_experiments (
 
 CREATE INDEX IF NOT EXISTS idx_autoresearch_exp_session
     ON autoresearch_experiments(session_id);
+
+CREATE TABLE IF NOT EXISTS autoresearch_recommendations (
+    id TEXT PRIMARY KEY,
+    source_session_id TEXT NOT NULL REFERENCES autoresearch_sessions(id),
+    recommendation_type TEXT NOT NULL,
+    strategy_name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    prompt_text TEXT,
+    priority INTEGER NOT NULL DEFAULT 50,
+    consumed_by_session_id TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_autoresearch_rec_source
+    ON autoresearch_recommendations(source_session_id);
 """
 
 
@@ -172,6 +188,8 @@ def _migrate_add_columns(conn: sqlite3.Connection):
         ("autoresearch_experiments", "prompt_text", "TEXT"),
         ("autoresearch_experiments", "config_json", "TEXT"),
         ("autoresearch_sessions", "report_md", "TEXT"),
+        ("autoresearch_sessions", "session_number", "INTEGER"),
+        ("autoresearch_sessions", "parent_session_id", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:

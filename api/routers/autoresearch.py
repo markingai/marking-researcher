@@ -37,6 +37,8 @@ def _row_to_session(row) -> AutoresearchSessionResponse:
         created_at=row["created_at"],
         completed_at=row["completed_at"],
         report_md=row["report_md"] if "report_md" in row.keys() else None,
+        session_number=row["session_number"] if "session_number" in row.keys() else None,
+        parent_session_id=row["parent_session_id"] if "parent_session_id" in row.keys() else None,
     )
 
 
@@ -80,11 +82,24 @@ async def start_session(
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        # Auto-increment session number
+        row = db.execute("SELECT MAX(session_number) as max_num FROM autoresearch_sessions").fetchone()
+        session_number = (row["max_num"] or 0) + 1 if row and row["max_num"] is not None else 1
+
+        # Find parent session (most recent completed session with recommendations)
+        parent_row = db.execute(
+            """SELECT s.id FROM autoresearch_sessions s
+            JOIN autoresearch_recommendations r ON r.source_session_id = s.id
+            WHERE r.consumed_by_session_id IS NULL
+            ORDER BY s.created_at DESC LIMIT 1"""
+        ).fetchone()
+        parent_id = parent_row["id"] if parent_row else None
+
         db.execute(
             """INSERT INTO autoresearch_sessions
-            (id, status, budget_usd, model, sample_size, created_at)
-            VALUES (?, 'running', ?, ?, ?, ?)""",
-            (session_id, req.budget_usd, req.model, req.sample_size, now),
+            (id, status, budget_usd, model, sample_size, session_number, parent_session_id, created_at)
+            VALUES (?, 'running', ?, ?, ?, ?, ?, ?)""",
+            (session_id, req.budget_usd, req.model, req.sample_size, session_number, parent_id, now),
         )
 
     autoresearch_manager.start_session(
@@ -184,3 +199,49 @@ async def session_events(
             ctx.remove_queue(queue)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/leaderboard")
+async def get_leaderboard(
+    _user: dict = Depends(get_current_user),
+):
+    """All-time strategy rankings aggregated across sessions."""
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT strategy_name,
+                   MAX(description) as description,
+                   COUNT(*) as times_tested,
+                   AVG(exact_match) as avg_exact_match,
+                   AVG(within_1) as avg_within_1,
+                   AVG(mae) as avg_mae,
+                   AVG(bias) as avg_bias,
+                   AVG(cost_usd) as avg_cost_usd,
+                   MAX(exact_match) as best_exact_match,
+                   MIN(created_at) as first_tested,
+                   MAX(created_at) as last_tested
+            FROM autoresearch_experiments
+            WHERE exact_match IS NOT NULL
+            GROUP BY strategy_name
+            ORDER BY MAX(exact_match) DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/leaderboard/timeline")
+async def get_timeline(
+    _user: dict = Depends(get_current_user),
+):
+    """Best exact_match achieved over time (per session)."""
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT s.id as session_id,
+                   s.created_at,
+                   s.best_exact_match,
+                   s.experiments_run,
+                   s.spent_usd,
+                   s.session_number
+            FROM autoresearch_sessions s
+            WHERE s.status IN ('completed', 'stopped')
+            ORDER BY s.created_at
+        """).fetchall()
+    return [dict(r) for r in rows]

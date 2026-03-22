@@ -432,6 +432,8 @@ export interface AutoresearchSession {
   created_at: string;
   completed_at: string | null;
   report_md: string | null;
+  session_number: number | null;
+  parent_session_id: string | null;
 }
 
 export interface AutoresearchExperiment {
@@ -512,6 +514,38 @@ export function subscribeToAutoresearchEvents(
   };
 
   return () => es.close();
+}
+
+// --- Leaderboard ---
+export interface LeaderboardEntry {
+  strategy_name: string;
+  description: string;
+  times_tested: number;
+  avg_exact_match: number;
+  avg_within_1: number;
+  avg_mae: number;
+  avg_bias: number;
+  avg_cost_usd: number;
+  best_exact_match: number;
+  first_tested: string | null;
+  last_tested: string | null;
+}
+
+export interface TimelineEntry {
+  session_id: string;
+  created_at: string;
+  best_exact_match: number;
+  experiments_run: number;
+  spent_usd: number;
+  session_number: number | null;
+}
+
+export async function getAutoresearchLeaderboard() {
+  return request<LeaderboardEntry[]>("/api/autoresearch/leaderboard");
+}
+
+export async function getAutoresearchTimeline() {
+  return request<TimelineEntry[]>("/api/autoresearch/leaderboard/timeline");
 }
 
 export { ApiError };

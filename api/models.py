@@ -218,6 +218,8 @@ class AutoresearchSessionResponse(BaseModel):
     created_at: str
     completed_at: str | None
     report_md: str | None = None
+    session_number: int | None = None
+    parent_session_id: str | None = None
 
 class AutoresearchExperimentResponse(BaseModel):
     id: str
@@ -240,3 +242,25 @@ class AutoresearchExperimentResponse(BaseModel):
 class AutoresearchSessionDetailResponse(BaseModel):
     session: AutoresearchSessionResponse
     experiments: list[AutoresearchExperimentResponse]
+
+
+class LeaderboardEntry(BaseModel):
+    strategy_name: str
+    description: str
+    times_tested: int
+    avg_exact_match: float
+    avg_within_1: float
+    avg_mae: float
+    avg_bias: float
+    avg_cost_usd: float
+    best_exact_match: float
+    first_tested: str | None = None
+    last_tested: str | None = None
+
+
+class TimelineEntry(BaseModel):
+    session_id: str
+    created_at: str
+    best_exact_match: float
+    experiments_run: int
+    spent_usd: float
