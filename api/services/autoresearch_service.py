@@ -19,6 +19,17 @@ from eval_agent.metrics import compute_metrics, compute_per_question_metrics
 from .. import database
 
 
+def _row_get(row, key, default=None):
+    """Safely get a column from a sqlite3.Row (which lacks .get())."""
+    try:
+        if key in row.keys():
+            val = row[key]
+            return val if val is not None else default
+    except (AttributeError, IndexError):
+        pass
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Strategy recipes — each returns a (name, description, Strategy) tuple
 # ---------------------------------------------------------------------------
@@ -593,7 +604,7 @@ class AutoresearchManager:
         # Sort by composite score (within_10_pct primary, exact_match secondary)
         ranked = sorted(
             exps,
-            key=lambda e: (e.get("within_10_pct") or 0, e["exact_match"] or 0),
+            key=lambda e: (_row_get(e, "within_10_pct", 0), e["exact_match"] or 0),
             reverse=True,
         )
         best = ranked[0]
@@ -630,7 +641,8 @@ class AutoresearchManager:
 
         context_parts.append("## Experiment Results (ranked by within-10% score)\n")
         for i, e in enumerate(ranked, 1):
-            w10 = f"{e.get('within_10_pct', 0) or 0:.1f}%" if e.get("within_10_pct") is not None else "N/A"
+            w10_val = _row_get(e, "within_10_pct")
+            w10 = f"{w10_val:.1f}%" if w10_val is not None else "N/A"
             context_parts.append(
                 f"{i}. **{e['description']}** (`{e['strategy_name']}`)\n"
                 f"   Within 10%: {w10} | Exact: {e['exact_match']:.1f}% | "
@@ -638,15 +650,16 @@ class AutoresearchManager:
                 f"Bias: {e['bias']:+.2f} | Cost: ${e['cost_usd']:.2f}"
             )
             # Add prompt summary (first 200 chars)
-            if e.get("prompt_text"):
-                prompt_preview = e["prompt_text"][:300].replace("\n", " ")
+            prompt_text = _row_get(e, "prompt_text")
+            if prompt_text:
+                prompt_preview = prompt_text[:300].replace("\n", " ")
                 context_parts.append(f"   Prompt approach: {prompt_preview}...")
         context_parts.append("")
 
         # Per-question data for top 3 strategies
         context_parts.append("## Per-Question Breakdown (Top 3 Strategies)\n")
         for e in ranked[:3]:
-            if e.get("per_question_json"):
+            if _row_get(e, "per_question_json"):
                 per_q = json.loads(e["per_question_json"])
                 context_parts.append(f"### {e['description']} (`{e['strategy_name']}`)")
                 for qn in sorted(per_q.keys()):
@@ -761,7 +774,8 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
         lines.append(f"**{best['description']}** (`{best['strategy_name']}`)\n")
         lines.append("| Metric | Value |")
         lines.append("|--------|-------|")
-        w10 = f"{best.get('within_10_pct', 0) or 0:.1f}%" if best.get("within_10_pct") is not None else "N/A"
+        best_w10 = _row_get(best, "within_10_pct")
+        w10 = f"{best_w10:.1f}%" if best_w10 is not None else "N/A"
         lines.append(f"| Within 10% | {w10} |")
         lines.append(f"| Exact Match | {best['exact_match']:.1f}% |")
         lines.append(f"| Within 1 Mark | {best['within_1']:.1f}% |")
@@ -774,7 +788,8 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
         lines.append("| Rank | Strategy | W/10% | Exact % | W/in 1 % | MAE | Bias | Cost |")
         lines.append("|------|----------|-------|---------|----------|-----|------|------|")
         for i, e in enumerate(ranked, 1):
-            w10 = f"{e.get('within_10_pct', 0) or 0:.1f}%" if e.get("within_10_pct") is not None else "N/A"
+            e_w10 = _row_get(e, "within_10_pct")
+            w10 = f"{e_w10:.1f}%" if e_w10 is not None else "N/A"
             lines.append(
                 f"| {i} | {e['description']} | {w10} | {e['exact_match']:.1f}% | "
                 f"{e['within_1']:.1f}% | {e['mae']:.2f} | {e['bias']:+.2f} | "
