@@ -551,6 +551,13 @@ export async function getAutoresearchTimeline() {
   return request<TimelineEntry[]>("/api/autoresearch/leaderboard/timeline");
 }
 
+export async function regenerateReport(sessionId: string) {
+  return request<{ status: string; report_length: number }>(
+    `/api/autoresearch/sessions/${sessionId}/regenerate-report`,
+    { method: "POST" },
+  );
+}
+
 export async function promoteExperiment(experimentId: string) {
   return request<{ run_id: string; status: string }>(
     `/api/autoresearch/experiments/${experimentId}/promote`,

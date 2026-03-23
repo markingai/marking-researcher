@@ -53,6 +53,7 @@ import {
   getAutoresearchLeaderboard,
   getAutoresearchTimeline,
   promoteExperiment,
+  regenerateReport,
   type AutoresearchSession,
   type AutoresearchExperiment,
   type LeaderboardEntry,
@@ -83,6 +84,7 @@ export default function AutoresearchPage() {
   const [activeTab, setActiveTab] = useState("session");
   const [expandedLeaderboardRow, setExpandedLeaderboardRow] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
 
   // Progress tracking
   const [currentProgress, setCurrentProgress] = useState<{
@@ -561,7 +563,7 @@ export default function AutoresearchPage() {
                           <TableHead className="text-right">
                             <span className="inline-flex items-center gap-1">
                               <span className="font-bold">W/10%</span>
-                              <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. &#xB1;0.5 for a 4-mark question, &#xB1;2.5 for a 24-mark question.">
+                              <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. ±0.5 for a 4-mark question, ±2.5 for a 24-mark question.">
                                 <Info className="h-3 w-3 text-muted-foreground inline" />
                               </span>
                             </span>
@@ -788,7 +790,7 @@ export default function AutoresearchPage() {
                         <div className="space-y-1">
                           <div className="text-xs text-muted-foreground flex items-center gap-1">
                             Within 10%
-                            <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. &#xB1;0.5 for a 4-mark question, &#xB1;2.5 for a 24-mark question.">
+                            <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. ±0.5 for a 4-mark question, ±2.5 for a 24-mark question.">
                               <Info className="h-3 w-3 text-muted-foreground" />
                             </span>
                           </div>
@@ -1273,7 +1275,7 @@ export default function AutoresearchPage() {
                   )}
 
                   {/* Session Report for selected session */}
-                  {activeSession?.report_md && (
+                  {activeSession?.report_md ? (
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
@@ -1295,7 +1297,50 @@ export default function AutoresearchPage() {
                         </div>
                       </CardContent>
                     </Card>
-                  )}
+                  ) : activeSession && experiments.length > 0 && (activeSession.status === "failed" || activeSession.status === "completed") ? (
+                    <Card>
+                      <CardContent className="py-8 text-center">
+                        <FileText className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
+                        <p className="text-sm text-muted-foreground mb-4">
+                          No report was generated for this session.
+                        </p>
+                        <Button
+                          onClick={async () => {
+                            setRegenerating(true);
+                            try {
+                              await regenerateReport(activeSession.id);
+                              toast.success("Report generated! Reloading...");
+                              // Reload session detail to get the new report
+                              const detail = await getAutoresearchSession(activeSession.id);
+                              setActiveSession(detail.session);
+                              setExperiments(detail.experiments);
+                              // Also refresh sessions list
+                              const allSessions = await getAutoresearchSessions();
+                              setSessions(allSessions);
+                            } catch (err) {
+                              toast.error("Failed to generate report");
+                              console.error(err);
+                            } finally {
+                              setRegenerating(false);
+                            }
+                          }}
+                          disabled={regenerating}
+                        >
+                          {regenerating ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Generating Report...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="mr-2 h-4 w-4" />
+                              Generate Report
+                            </>
+                          )}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ) : null}
                 </>
               ) : (
                 <Card>
