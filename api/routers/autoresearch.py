@@ -147,6 +147,30 @@ async def get_session(
     )
 
 
+@router.post("/sessions/{session_id}/regenerate-report")
+async def regenerate_report(
+    session_id: str,
+    _user: dict = Depends(get_current_user),
+):
+    """Regenerate the report for a completed/failed session."""
+    with get_db() as db:
+        session_row = db.execute(
+            "SELECT * FROM autoresearch_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    report_md = autoresearch_manager._generate_report(session_id)
+
+    with get_db() as db:
+        db.execute(
+            "UPDATE autoresearch_sessions SET status='completed', report_md=? WHERE id=?",
+            (report_md, session_id),
+        )
+
+    return {"status": "ok", "report_length": len(report_md)}
+
+
 @router.post("/sessions/{session_id}/stop")
 async def stop_session(
     session_id: str,
