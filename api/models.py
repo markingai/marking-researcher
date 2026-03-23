@@ -227,6 +227,7 @@ class AutoresearchExperimentResponse(BaseModel):
     description: str
     strategy_name: str
     exact_match: float | None
+    within_10_pct: float | None = None
     within_1: float | None
     mae: float | None
     bias: float | None
@@ -249,11 +250,13 @@ class LeaderboardEntry(BaseModel):
     description: str
     times_tested: int
     avg_exact_match: float
+    avg_within_10_pct: float | None = None
     avg_within_1: float
     avg_mae: float
     avg_bias: float
     avg_cost_usd: float
     best_exact_match: float
+    best_within_10_pct: float | None = None
     first_tested: str | None = None
     last_tested: str | None = None
 

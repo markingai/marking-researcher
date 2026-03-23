@@ -29,8 +29,6 @@ import {
   Bot,
   Play,
   Square,
-  Check,
-  X,
   Trophy,
   Loader2,
   DollarSign,
@@ -42,6 +40,8 @@ import {
   TrendingUp,
   Sparkles,
   Clock,
+  Info,
+  Rocket,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -52,6 +52,7 @@ import {
   subscribeToAutoresearchEvents,
   getAutoresearchLeaderboard,
   getAutoresearchTimeline,
+  promoteExperiment,
   type AutoresearchSession,
   type AutoresearchExperiment,
   type LeaderboardEntry,
@@ -81,6 +82,7 @@ export default function AutoresearchPage() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [activeTab, setActiveTab] = useState("session");
   const [expandedLeaderboardRow, setExpandedLeaderboardRow] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<string | null>(null);
 
   // Progress tracking
   const [currentProgress, setCurrentProgress] = useState<{
@@ -182,6 +184,7 @@ export default function AutoresearchPage() {
             description: exp.description,
             strategy_name: exp.strategy_name,
             exact_match: exp.exact_match,
+            within_10_pct: exp.within_10_pct ?? null,
             within_1: exp.within_1,
             mae: exp.mae,
             bias: exp.bias,
@@ -291,7 +294,29 @@ export default function AutoresearchPage() {
 
   const isRunning = activeSession?.status === "running";
   const isCompleted = activeSession?.status === "completed" || activeSession?.status === "stopped";
-  const bestExperiment = experiments.find((e) => e.kept && e.exact_match === activeSession?.best_exact_match);
+
+  // Rank experiments by within_10_pct desc, then exact_match desc
+  const rankedExperiments = [...experiments].sort((a, b) => {
+    const a10 = a.within_10_pct ?? 0;
+    const b10 = b.within_10_pct ?? 0;
+    if (b10 !== a10) return b10 - a10;
+    return (b.exact_match ?? 0) - (a.exact_match ?? 0);
+  });
+  const experimentRankMap = new Map<string, number>();
+  rankedExperiments.forEach((exp, i) => experimentRankMap.set(exp.id, i + 1));
+  const bestExperiment = rankedExperiments.length > 0 ? rankedExperiments[0] : undefined;
+
+  const handlePromote = async (experimentId: string) => {
+    setPromoting(experimentId);
+    try {
+      await promoteExperiment(experimentId);
+      toast.success("Full evaluation started!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to promote experiment");
+    } finally {
+      setPromoting(null);
+    }
+  };
 
   // Per-question chart data from best experiment
   const perQuestionData = bestExperiment?.per_question
@@ -299,6 +324,7 @@ export default function AutoresearchPage() {
         .map(([qn, m]) => ({
           question: qn.replace("Question ", "Q"),
           exact_match: m.exact_match,
+          within_10_pct: m.within_10_pct ?? 0,
           within_1: m.within_1 ?? 0,
           mae: m.mae,
           n: m.n,
@@ -530,30 +556,36 @@ export default function AutoresearchPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-10">#</TableHead>
+                          <TableHead className="w-10">Rank</TableHead>
                           <TableHead>Strategy</TableHead>
+                          <TableHead className="text-right">
+                            <span className="inline-flex items-center gap-1">
+                              <span className="font-bold">W/10%</span>
+                              <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. &#xB1;0.5 for a 4-mark question, &#xB1;2.5 for a 24-mark question.">
+                                <Info className="h-3 w-3 text-muted-foreground inline" />
+                              </span>
+                            </span>
+                          </TableHead>
                           <TableHead className="text-right">Exact %</TableHead>
                           <TableHead className="text-right">Within 1</TableHead>
                           <TableHead className="text-right">MAE</TableHead>
                           <TableHead className="text-right">Bias</TableHead>
                           <TableHead className="text-right">Cost</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {experiments.map((exp, i) => {
-                          const isBest =
-                            exp.kept &&
-                            exp.exact_match === activeSession?.best_exact_match;
+                        {experiments.map((exp) => {
+                          const rank = experimentRankMap.get(exp.id) ?? experiments.length;
+                          const isBest = rank === 1;
                           const isExpanded = expandedExperiment === exp.id;
                           return (
                             <>
                               <TableRow
                                 key={exp.id}
                                 className={`cursor-pointer transition-colors ${
-                                  exp.kept
-                                    ? "bg-emerald-500/5 hover:bg-emerald-500/10"
-                                    : "opacity-60 hover:opacity-80"
+                                  rank === 1
+                                    ? "bg-amber-500/5 hover:bg-amber-500/10"
+                                    : "hover:bg-accent"
                                 }`}
                                 onClick={() =>
                                   setExpandedExperiment(isExpanded ? null : exp.id)
@@ -566,7 +598,7 @@ export default function AutoresearchPage() {
                                     ) : (
                                       <ChevronRight className="h-3 w-3 text-muted-foreground" />
                                     )}
-                                    {i + 1}
+                                    {rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank}
                                   </div>
                                 </TableCell>
                                 <TableCell>
@@ -583,6 +615,11 @@ export default function AutoresearchPage() {
                                       </div>
                                     </div>
                                   </div>
+                                </TableCell>
+                                <TableCell className="text-right font-mono font-bold">
+                                  {exp.within_10_pct != null
+                                    ? `${exp.within_10_pct.toFixed(1)}%`
+                                    : "-"}
                                 </TableCell>
                                 <TableCell className="text-right font-mono">
                                   {exp.exact_match != null
@@ -605,32 +642,35 @@ export default function AutoresearchPage() {
                                 <TableCell className="text-right font-mono">
                                   ${exp.cost_usd.toFixed(2)}
                                 </TableCell>
-                                <TableCell className="text-center">
-                                  {exp.kept ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                    >
-                                      <Check className="mr-1 h-3 w-3" />
-                                      Kept
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="text-muted-foreground">
-                                      <X className="mr-1 h-3 w-3" />
-                                      Discarded
-                                    </Badge>
-                                  )}
-                                </TableCell>
                               </TableRow>
 
                               {isExpanded && (
                                 <TableRow key={`${exp.id}-detail`}>
-                                  <TableCell colSpan={8} className="bg-muted/30 p-4">
+                                  <TableCell colSpan={9} className="bg-muted/30 p-4">
                                     <div className="space-y-4">
-                                      <div>
-                                        <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                      <div className="flex items-center justify-between">
+                                        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
                                           System Prompt
                                         </h4>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="gap-1.5"
+                                          disabled={promoting === exp.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handlePromote(exp.id);
+                                          }}
+                                        >
+                                          {promoting === exp.id ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          ) : (
+                                            <Rocket className="h-3.5 w-3.5" />
+                                          )}
+                                          Promote
+                                        </Button>
+                                      </div>
+                                      <div>
                                         {exp.prompt_text ? (
                                           <pre className="whitespace-pre-wrap text-xs bg-background border rounded-md p-3 max-h-48 overflow-y-auto font-mono">
                                             {exp.prompt_text}
@@ -679,6 +719,9 @@ export default function AutoresearchPage() {
                                                     {m.exact_match.toFixed(0)}%
                                                   </div>
                                                   <div className="text-[10px] text-muted-foreground">
+                                                    W/10%: {m.within_10_pct != null ? `${m.within_10_pct.toFixed(0)}%` : "N/A"}
+                                                  </div>
+                                                  <div className="text-[10px] text-muted-foreground">
                                                     W/in 1: {m.within_1 != null ? `${m.within_1.toFixed(0)}%` : "N/A"}
                                                   </div>
                                                 </div>
@@ -712,7 +755,7 @@ export default function AutoresearchPage() {
                                 </div>
                               </div>
                             </TableCell>
-                            <TableCell colSpan={6}>
+                            <TableCell colSpan={7}>
                               <Progress
                                 value={
                                   (currentProgress.rows_completed / currentProgress.rows_total) * 100
@@ -740,37 +783,66 @@ export default function AutoresearchPage() {
                       <CardDescription>{bestExperiment.description}</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-4">
+                        {/* Primary stat: Within 10% */}
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Exact Match</div>
-                          <div className="text-2xl font-bold">
-                            {bestExperiment.exact_match?.toFixed(1)}%
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            Within 10%
+                            <span title="Within 10% of total marks for each question (rounded up to nearest 0.5 mark). E.g. &#xB1;0.5 for a 4-mark question, &#xB1;2.5 for a 24-mark question.">
+                              <Info className="h-3 w-3 text-muted-foreground" />
+                            </span>
+                          </div>
+                          <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">
+                            {bestExperiment.within_10_pct != null ? `${bestExperiment.within_10_pct.toFixed(1)}%` : "-"}
                           </div>
                         </div>
-                        <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Within 1 Mark</div>
-                          <div className="text-2xl font-bold">
-                            {bestExperiment.within_1?.toFixed(1)}%
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground">Exact Match</div>
+                            <div className="text-2xl font-bold">
+                              {bestExperiment.exact_match?.toFixed(1)}%
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground">Within 1 Mark</div>
+                            <div className="text-2xl font-bold">
+                              {bestExperiment.within_1?.toFixed(1)}%
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground">MAE</div>
+                            <div className="text-2xl font-bold">
+                              {bestExperiment.mae?.toFixed(2)}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground">Bias</div>
+                            <div className="text-2xl font-bold">
+                              {bestExperiment.bias != null
+                                ? `${bestExperiment.bias >= 0 ? "+" : ""}${bestExperiment.bias.toFixed(2)}`
+                                : "-"}
+                            </div>
                           </div>
                         </div>
-                        <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">MAE</div>
-                          <div className="text-2xl font-bold">
-                            {bestExperiment.mae?.toFixed(2)}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <DollarSign className="h-3 w-3" />
+                            Cost: ${bestExperiment.cost_usd.toFixed(2)} | {bestExperiment.n} rows evaluated
                           </div>
+                          <Button
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={promoting === bestExperiment.id}
+                            onClick={() => handlePromote(bestExperiment.id)}
+                          >
+                            {promoting === bestExperiment.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Rocket className="h-3.5 w-3.5" />
+                            )}
+                            Run Full Evaluation
+                          </Button>
                         </div>
-                        <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Bias</div>
-                          <div className="text-2xl font-bold">
-                            {bestExperiment.bias != null
-                              ? `${bestExperiment.bias >= 0 ? "+" : ""}${bestExperiment.bias.toFixed(2)}`
-                              : "-"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-                        <DollarSign className="h-3 w-3" />
-                        Cost: ${bestExperiment.cost_usd.toFixed(2)} | {bestExperiment.n} rows evaluated
                       </div>
                     </CardContent>
                   </Card>
@@ -804,6 +876,7 @@ export default function AutoresearchPage() {
                                   <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
                                     <div className="font-medium">{d.question}</div>
                                     <div>Exact: {d.exact_match.toFixed(1)}%</div>
+                                    <div>Within 10%: {d.within_10_pct.toFixed(1)}%</div>
                                     <div>Within 1: {d.within_1.toFixed(1)}%</div>
                                     <div>MAE: {d.mae.toFixed(2)}</div>
                                     <div>n={d.n}</div>
@@ -818,6 +891,12 @@ export default function AutoresearchPage() {
                               dataKey="exact_match"
                               name="Exact Match"
                               fill="hsl(var(--chart-1))"
+                              radius={[4, 4, 0, 0]}
+                            />
+                            <Bar
+                              dataKey="within_10_pct"
+                              name="Within 10%"
+                              fill="hsl(142, 71%, 45%)"
                               radius={[4, 4, 0, 0]}
                             />
                             <Bar
@@ -886,6 +965,8 @@ export default function AutoresearchPage() {
                           <TableRow>
                             <TableHead className="w-10">#</TableHead>
                             <TableHead>Strategy</TableHead>
+                            <TableHead className="text-right font-bold">Best W/10%</TableHead>
+                            <TableHead className="text-right font-bold">Avg W/10%</TableHead>
                             <TableHead className="text-right">Best Exact%</TableHead>
                             <TableHead className="text-right">Avg Exact%</TableHead>
                             <TableHead className="text-right">Avg W/in 1%</TableHead>
@@ -929,6 +1010,12 @@ export default function AutoresearchPage() {
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-right font-mono font-bold">
+                                    {entry.best_within_10_pct != null ? `${entry.best_within_10_pct.toFixed(1)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono font-bold">
+                                    {entry.avg_within_10_pct != null ? `${entry.avg_within_10_pct.toFixed(1)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">
                                     {entry.best_exact_match.toFixed(1)}%
                                   </TableCell>
                                   <TableCell className="text-right font-mono">
@@ -949,7 +1036,7 @@ export default function AutoresearchPage() {
                                 </TableRow>
                                 {isLbExpanded && (
                                   <TableRow key={`${entry.strategy_name}-detail`}>
-                                    <TableCell colSpan={8} className="bg-muted/30 p-4">
+                                    <TableCell colSpan={10} className="bg-muted/30 p-4">
                                       <div className="space-y-2">
                                         <h4 className="text-xs font-semibold uppercase text-muted-foreground">
                                           Full Description
@@ -1127,25 +1214,28 @@ export default function AutoresearchPage() {
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="w-10">#</TableHead>
+                              <TableHead className="w-10">Rank</TableHead>
                               <TableHead>Strategy</TableHead>
+                              <TableHead className="text-right font-bold">W/10%</TableHead>
                               <TableHead className="text-right">Exact %</TableHead>
                               <TableHead className="text-right">Within 1</TableHead>
                               <TableHead className="text-right">MAE</TableHead>
                               <TableHead className="text-right">Bias</TableHead>
                               <TableHead className="text-right">Cost</TableHead>
-                              <TableHead className="text-center">Status</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {experiments.map((exp, i) => {
-                              const isBest = exp.kept && exp.exact_match === activeSession.best_exact_match;
+                            {experiments.map((exp) => {
+                              const rank = experimentRankMap.get(exp.id) ?? experiments.length;
+                              const isBest = rank === 1;
                               return (
                                 <TableRow
                                   key={exp.id}
-                                  className={exp.kept ? "bg-emerald-500/5" : "opacity-60"}
+                                  className={rank === 1 ? "bg-amber-500/5" : ""}
                                 >
-                                  <TableCell className="font-mono text-xs">{i + 1}</TableCell>
+                                  <TableCell className="font-mono text-xs">
+                                    {rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank}
+                                  </TableCell>
                                   <TableCell>
                                     <div className="flex items-center gap-2">
                                       {isBest && <Trophy className="h-3.5 w-3.5 text-amber-500" />}
@@ -1154,6 +1244,9 @@ export default function AutoresearchPage() {
                                         <div className="text-xs text-muted-foreground">{exp.strategy_name}</div>
                                       </div>
                                     </div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono font-bold">
+                                    {exp.within_10_pct != null ? `${exp.within_10_pct.toFixed(1)}%` : "-"}
                                   </TableCell>
                                   <TableCell className="text-right font-mono">
                                     {exp.exact_match != null ? `${exp.exact_match.toFixed(1)}%` : "-"}
@@ -1169,17 +1262,6 @@ export default function AutoresearchPage() {
                                   </TableCell>
                                   <TableCell className="text-right font-mono">
                                     ${exp.cost_usd.toFixed(2)}
-                                  </TableCell>
-                                  <TableCell className="text-center">
-                                    {exp.kept ? (
-                                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                                        <Check className="mr-1 h-3 w-3" />Kept
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="outline" className="text-muted-foreground">
-                                        <X className="mr-1 h-3 w-3" />Discarded
-                                      </Badge>
-                                    )}
                                   </TableCell>
                                 </TableRow>
                               );

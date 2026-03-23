@@ -442,6 +442,7 @@ export interface AutoresearchExperiment {
   description: string;
   strategy_name: string;
   exact_match: number | null;
+  within_10_pct: number | null;
   within_1: number | null;
   mae: number | null;
   bias: number | null;
@@ -449,7 +450,7 @@ export interface AutoresearchExperiment {
   n: number;
   model: string | null;
   kept: boolean;
-  per_question: Record<string, { n: number; exact_match: number; within_1?: number; mae: number; bias?: number }> | null;
+  per_question: Record<string, { n: number; exact_match: number; within_10_pct?: number; within_1?: number; mae: number; bias?: number }> | null;
   prompt_text: string | null;
   config_json: string | null;
   created_at: string;
@@ -522,11 +523,13 @@ export interface LeaderboardEntry {
   description: string;
   times_tested: number;
   avg_exact_match: number;
+  avg_within_10_pct: number | null;
   avg_within_1: number;
   avg_mae: number;
   avg_bias: number;
   avg_cost_usd: number;
   best_exact_match: number;
+  best_within_10_pct: number | null;
   first_tested: string | null;
   last_tested: string | null;
 }
@@ -546,6 +549,13 @@ export async function getAutoresearchLeaderboard() {
 
 export async function getAutoresearchTimeline() {
   return request<TimelineEntry[]>("/api/autoresearch/leaderboard/timeline");
+}
+
+export async function promoteExperiment(experimentId: string) {
+  return request<{ run_id: string; status: string }>(
+    `/api/autoresearch/experiments/${experimentId}/promote`,
+    { method: "POST" },
+  );
 }
 
 export { ApiError };

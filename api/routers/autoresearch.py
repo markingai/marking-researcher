@@ -56,6 +56,7 @@ def _row_to_experiment(row) -> AutoresearchExperimentResponse:
         description=row["description"],
         strategy_name=row["strategy_name"],
         exact_match=row["exact_match"],
+        within_10_pct=row["within_10_pct"] if "within_10_pct" in row.keys() else None,
         within_1=row["within_1"],
         mae=row["mae"],
         bias=row["bias"],
@@ -212,17 +213,19 @@ async def get_leaderboard(
                    MAX(description) as description,
                    COUNT(*) as times_tested,
                    AVG(exact_match) as avg_exact_match,
+                   AVG(within_10_pct) as avg_within_10_pct,
                    AVG(within_1) as avg_within_1,
                    AVG(mae) as avg_mae,
                    AVG(bias) as avg_bias,
                    AVG(cost_usd) as avg_cost_usd,
                    MAX(exact_match) as best_exact_match,
+                   MAX(within_10_pct) as best_within_10_pct,
                    MIN(created_at) as first_tested,
                    MAX(created_at) as last_tested
             FROM autoresearch_experiments
             WHERE exact_match IS NOT NULL
             GROUP BY strategy_name
-            ORDER BY MAX(exact_match) DESC
+            ORDER BY MAX(within_10_pct) DESC, MAX(exact_match) DESC
         """).fetchall()
     return [dict(r) for r in rows]
 
@@ -245,3 +248,102 @@ async def get_timeline(
             ORDER BY s.created_at
         """).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.post("/experiments/{experiment_id}/promote")
+async def promote_experiment(
+    experiment_id: str,
+    _user: dict = Depends(get_current_user),
+):
+    """Promote an autoresearch experiment to a full eval run."""
+    from ..services.run_manager import run_manager, register_temporary_strategy
+    from eval_agent.strategies import Strategy, parse_simple
+
+    with get_db() as db:
+        exp = db.execute(
+            "SELECT * FROM autoresearch_experiments WHERE id=?", (experiment_id,)
+        ).fetchone()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    # Parse config
+    config = {}
+    if exp["config_json"]:
+        try:
+            config = json.loads(exp["config_json"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    model = config.get("model", "gemini-2.5-pro")
+    temperature = config.get("temperature", 0.0)
+    thinking_budget = config.get("thinking_budget", 4096)
+    strategy_name = f"promoted_{experiment_id[:8]}"
+
+    # Build a prompt function from stored prompt_text
+    stored_prompt = exp["prompt_text"] or ""
+
+    def _make_promoted_prompt(prompt_text: str):
+        """Create a prompt_fn closure from stored prompt text."""
+        def prompt_fn(row):
+            user_parts = [
+                f"Question: {row.question_text}\n\n"
+                f"Mark scheme: {row.mark_scheme}\n\n"
+                f"Total marks: {row.total_marks}\n\n"
+                f"Student response: {row.student_response}"
+            ]
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "mark": {"type": "INTEGER"},
+                    "justification": {"type": "STRING"},
+                },
+                "required": ["mark", "justification"],
+            }
+            return prompt_text, user_parts, schema
+        return prompt_fn
+
+    strategy = Strategy(
+        name=strategy_name,
+        description=f"Promoted: {exp['description']}",
+        subject="english",
+        model=model,
+        temperature=temperature,
+        thinking=True,
+        thinking_budget=thinking_budget,
+        prompt_fn=_make_promoted_prompt(stored_prompt),
+        parse_fn=parse_simple,
+        provider="gemini",
+    )
+    register_temporary_strategy(strategy)
+
+    # Create a run
+    run_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        db.execute(
+            """INSERT INTO runs (id, name, subject, input_mode, status,
+               sample_size_requested, random_seed, model_override, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (run_id, f"Promoted: {exp['description']}", "english", "csv",
+             "pending", 100, 42, model, now),
+        )
+        db.execute(
+            """INSERT INTO run_strategies (run_id, strategy_name, status)
+            VALUES (?, ?, ?)""",
+            (run_id, strategy_name, "pending"),
+        )
+
+    # Start the run
+    run_manager.start_run(
+        run_id=run_id,
+        subject="english",
+        input_mode="csv",
+        strategy_names=[strategy_name],
+        questions=None,
+        sample_size=100,
+        random_seed=42,
+        model_override=model,
+    )
+
+    return {"run_id": run_id, "status": "running"}

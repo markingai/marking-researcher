@@ -1,10 +1,21 @@
 """Metric calculations for eval results."""
 
 from __future__ import annotations
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 
 from .runner import EvalResult
+
+
+def _within_10_pct_threshold(total_marks: int) -> float:
+    """10% of total marks, rounded up to nearest 0.5.
+
+    For small questions this prevents the threshold from being so tight
+    that only exact matches count (e.g. 4 marks → 0.4 → rounds up to 0.5).
+    """
+    raw = 0.1 * total_marks
+    return max(0.5, math.ceil(raw * 2) / 2)
 
 
 @dataclass
@@ -13,6 +24,7 @@ class MetricSet:
     exact_match: float = 0.0
     exact_match_rounded: float = 0.0  # round(human) == ai
     within_half: float = 0.0
+    within_10_pct: float = 0.0  # within 10% of total marks (rounded up to 0.5)
     within_1: float = 0.0
     mae: float = 0.0
     mse: float = 0.0
@@ -34,6 +46,10 @@ def compute_metrics(results: list[EvalResult]) -> MetricSet:
     exact = sum(1 for r in valid if r.ai_mark == r.human_mark)
     exact_rounded = sum(1 for r in valid if r.ai_mark == round(r.human_mark))
     within_half = sum(1 for r in valid if abs(r.ai_mark - r.human_mark) <= 0.5)
+    within_10_pct = sum(
+        1 for r in valid
+        if abs(r.ai_mark - r.human_mark) <= _within_10_pct_threshold(r.total_marks)
+    )
     within_1 = sum(1 for r in valid if abs(r.ai_mark - r.human_mark) <= 1)
 
     errors_list = [r.ai_mark - r.human_mark for r in valid]
@@ -48,6 +64,7 @@ def compute_metrics(results: list[EvalResult]) -> MetricSet:
         exact_match=exact / n * 100,
         exact_match_rounded=exact_rounded / n * 100,
         within_half=within_half / n * 100,
+        within_10_pct=within_10_pct / n * 100,
         within_1=within_1 / n * 100,
         mae=sum(abs_errors) / n,
         mse=sum(sq_errors) / n,

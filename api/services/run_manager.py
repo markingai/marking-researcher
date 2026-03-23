@@ -19,6 +19,15 @@ from eval_agent.metrics import compute_metrics
 from .. import database
 
 
+# Temporary strategy registry for promoted experiments
+_temporary_strategies: dict[str, Strategy] = {}
+
+
+def register_temporary_strategy(strategy: Strategy):
+    """Register a strategy for one-time use (e.g. promoted from autoresearch)."""
+    _temporary_strategies[strategy.name] = strategy
+
+
 @dataclass
 class RunContext:
     run_id: str
@@ -157,6 +166,11 @@ class RunManager:
                             build_generic_strategies(subj["slug"], subj["display_name"])
                         )
                         break
+
+            # Check temporary registry for promoted strategies
+            for sn in list(strategy_names):
+                if sn in _temporary_strategies:
+                    all_strategies.append(_temporary_strategies.pop(sn))
 
             # Filter to selected strategies
             strategies = [s for s in all_strategies if s.name in strategy_names]

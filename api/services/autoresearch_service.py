@@ -576,7 +576,8 @@ class AutoresearchManager:
             ctx.cancelled = True
 
     def _generate_report(self, session_id: str) -> str:
-        """Generate a Markdown session report from experiment results."""
+        """Generate an LLM-written research report, with template fallback."""
+        # Gather data
         with database.get_db() as db:
             session = db.execute(
                 "SELECT * FROM autoresearch_sessions WHERE id=?", (session_id,)
@@ -589,9 +590,162 @@ class AutoresearchManager:
         if not exps:
             return "No experiments completed."
 
-        # Sort by exact_match descending
-        ranked = sorted(exps, key=lambda e: (e["exact_match"] or 0), reverse=True)
+        # Sort by composite score (within_10_pct primary, exact_match secondary)
+        ranked = sorted(
+            exps,
+            key=lambda e: (e.get("within_10_pct") or 0, e["exact_match"] or 0),
+            reverse=True,
+        )
         best = ranked[0]
+
+        # Generate next-session recommendations (always template-based)
+        recs = self._generate_recommendations(session_id)
+
+        # Try LLM report first, fall back to template
+        try:
+            llm_report = self._generate_llm_report(session, exps, ranked, best, recs)
+            if llm_report and len(llm_report) > 200:
+                return llm_report
+        except Exception as e:
+            print(f"LLM report generation failed: {e}")
+
+        return self._generate_template_report(session, exps, ranked, best, recs)
+
+    def _generate_llm_report(self, session, exps, ranked, best, recs) -> str:
+        """Use Gemini to write a proper research report from experiment data."""
+        from eval_agent.gemini_client import GeminiClient
+
+        # Build structured context for the LLM
+        context_parts = []
+        context_parts.append("# Autoresearch Session Data\n")
+        context_parts.append(f"Date: {session['created_at'][:10]}")
+        context_parts.append(f"Model: {session['model']}")
+        context_parts.append(f"Sample size: {session['sample_size']} rows (stratified by question)")
+        context_parts.append(f"Total cost: ${session['spent_usd']:.2f}")
+        context_parts.append(f"Experiments run: {session['experiments_run']}")
+        sn = session['session_number'] if 'session_number' in session.keys() else None
+        if sn and sn > 1:
+            context_parts.append(f"Session number: {sn} (learning from {sn - 1} prior session(s))")
+        context_parts.append("")
+
+        context_parts.append("## Experiment Results (ranked by within-10% score)\n")
+        for i, e in enumerate(ranked, 1):
+            w10 = f"{e.get('within_10_pct', 0) or 0:.1f}%" if e.get("within_10_pct") is not None else "N/A"
+            context_parts.append(
+                f"{i}. **{e['description']}** (`{e['strategy_name']}`)\n"
+                f"   Within 10%: {w10} | Exact: {e['exact_match']:.1f}% | "
+                f"Within 1: {e['within_1']:.1f}% | MAE: {e['mae']:.2f} | "
+                f"Bias: {e['bias']:+.2f} | Cost: ${e['cost_usd']:.2f}"
+            )
+            # Add prompt summary (first 200 chars)
+            if e.get("prompt_text"):
+                prompt_preview = e["prompt_text"][:300].replace("\n", " ")
+                context_parts.append(f"   Prompt approach: {prompt_preview}...")
+        context_parts.append("")
+
+        # Per-question data for top 3 strategies
+        context_parts.append("## Per-Question Breakdown (Top 3 Strategies)\n")
+        for e in ranked[:3]:
+            if e.get("per_question_json"):
+                per_q = json.loads(e["per_question_json"])
+                context_parts.append(f"### {e['description']} (`{e['strategy_name']}`)")
+                for qn in sorted(per_q.keys()):
+                    m = per_q[qn]
+                    w10 = f"{m.get('within_10_pct', 0):.0f}%" if m.get("within_10_pct") is not None else "N/A"
+                    context_parts.append(
+                        f"  {qn}: W/10%={w10}, Exact={m['exact_match']:.0f}%, "
+                        f"W/1={m.get('within_1', 0):.0f}%, MAE={m['mae']:.2f}, n={m['n']}"
+                    )
+                context_parts.append("")
+
+        # Prior sessions context
+        with database.get_db() as db:
+            prior_best = db.execute(
+                "SELECT strategy_name, MAX(exact_match) as best_exact, "
+                "MAX(within_10_pct) as best_w10 "
+                "FROM autoresearch_experiments WHERE session_id != ? AND exact_match IS NOT NULL "
+                "GROUP BY strategy_name ORDER BY MAX(within_10_pct) DESC LIMIT 5",
+                (session['id'],),
+            ).fetchall()
+        if prior_best:
+            context_parts.append("## Prior Session Best Strategies (for context)\n")
+            for p in prior_best:
+                w10 = f"{p['best_w10']:.1f}%" if p['best_w10'] else "N/A"
+                context_parts.append(f"- {p['strategy_name']}: W/10%={w10}, Exact={p['best_exact']:.1f}%")
+            context_parts.append("")
+
+        context_str = "\n".join(context_parts)
+
+        system_prompt = """You are a research analyst writing a report on AI marking strategy experiments for GCSE English.
+
+Write a structured Markdown research report. Be specific with numbers, reference strategy names, and explain WHY certain approaches worked or didn't based on what the strategy does.
+
+Use ONLY these Markdown elements (the renderer only supports these):
+- # for main title, ## for section headers (no ### or deeper)
+- **bold** for emphasis
+- Bullet lists with -
+- Numbered lists with 1. 2. 3.
+- Tables with | header | ... | format
+- `backtick` for code/strategy names
+
+Required sections:
+1. **# Research Report** — title
+2. **## Executive Summary** — 2-3 sentences: what was tested, key finding, top recommendation
+3. **## Methodology** — model, sample size, how strategies were selected, budget, any learning from prior sessions
+4. **## Results & Analysis** — NARRATIVE PARAGRAPHS (not just tables). Compare strategies, explain why some worked better. Include a comparison table but surround it with analysis. Discuss the within-10% metric as the primary success measure.
+5. **## Per-Question Analysis** — Which questions are easy/hard for AI and why. Narrative + table.
+6. **## Cost-Effectiveness** — Cost per percentage point improvement. Which strategies give best value.
+7. **## Statistical Considerations** — Sample size limitations. Whether differences between top strategies are meaningful or could be noise.
+8. **## Recommendations** — Top 3 actionable next steps with rationale. Be specific about what to try next and why.
+
+Keep the report concise but insightful — aim for 600-1000 words of actual analysis."""
+
+        client = GeminiClient(
+            api_key=eval_config.GEMINI_API_KEY,
+            model=session['model'],
+        )
+        resp = client.generate(
+            system_instruction=system_prompt,
+            user_parts=[context_str],
+            temperature=0.3,
+            thinking=True,
+            thinking_budget=4096,
+        )
+
+        # Extract text — no response_schema so it comes back as raw text or parsed
+        if "error" in resp and "raw" not in resp:
+            raise ValueError(f"LLM report failed: {resp.get('error')}")
+
+        report_text = resp.get("raw", "") or resp.get("text", "")
+        if not report_text:
+            # Try to extract from any text-like field
+            for key in resp:
+                if key.startswith("_"):
+                    continue
+                val = resp[key]
+                if isinstance(val, str) and len(val) > 100:
+                    report_text = val
+                    break
+
+        if not report_text:
+            raise ValueError("Empty LLM response")
+
+        # Append template-based next-session recommendations
+        if recs:
+            report_text += "\n\n## Recommendations for Next Session\n\n"
+            report_text += "These recommendations will be automatically used by the next research session.\n\n"
+            report_text += "| Priority | Type | Strategy | Rationale |\n"
+            report_text += "|----------|------|----------|----------|\n"
+            for rec in recs[:10]:
+                report_text += (
+                    f"| {rec['priority']} | {rec['type']} | "
+                    f"`{rec['strategy_name']}` | {rec['description']} |\n"
+                )
+
+        return report_text
+
+    def _generate_template_report(self, session, exps, ranked, best, recs) -> str:
+        """Fallback template-based report generation."""
         baseline = next((e for e in exps if e["strategy_name"] == "ar_baseline"), None)
 
         lines = []
@@ -605,24 +759,26 @@ class AutoresearchManager:
         # Winner
         lines.append("## Best Strategy\n")
         lines.append(f"**{best['description']}** (`{best['strategy_name']}`)\n")
-        lines.append(f"| Metric | Value |")
-        lines.append(f"|--------|-------|")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        w10 = f"{best.get('within_10_pct', 0) or 0:.1f}%" if best.get("within_10_pct") is not None else "N/A"
+        lines.append(f"| Within 10% | {w10} |")
         lines.append(f"| Exact Match | {best['exact_match']:.1f}% |")
         lines.append(f"| Within 1 Mark | {best['within_1']:.1f}% |")
         lines.append(f"| MAE | {best['mae']:.2f} |")
         lines.append(f"| Bias | {best['bias']:+.2f} |")
         lines.append(f"| Cost | ${best['cost_usd']:.2f} |\n")
 
-        # Comparison table
+        # Comparison table (no Kept/Discarded — just ranking)
         lines.append("## Strategy Comparison\n")
-        lines.append("| # | Strategy | Exact % | W/in 1 % | MAE | Bias | Cost | Status |")
-        lines.append("|---|----------|---------|----------|-----|------|------|--------|")
+        lines.append("| Rank | Strategy | W/10% | Exact % | W/in 1 % | MAE | Bias | Cost |")
+        lines.append("|------|----------|-------|---------|----------|-----|------|------|")
         for i, e in enumerate(ranked, 1):
-            status = "Kept" if e["kept"] else "Discarded"
+            w10 = f"{e.get('within_10_pct', 0) or 0:.1f}%" if e.get("within_10_pct") is not None else "N/A"
             lines.append(
-                f"| {i} | {e['description']} | {e['exact_match']:.1f}% | "
+                f"| {i} | {e['description']} | {w10} | {e['exact_match']:.1f}% | "
                 f"{e['within_1']:.1f}% | {e['mae']:.2f} | {e['bias']:+.2f} | "
-                f"${e['cost_usd']:.2f} | {status} |"
+                f"${e['cost_usd']:.2f} |"
             )
         lines.append("")
 
@@ -638,21 +794,18 @@ class AutoresearchManager:
             else:
                 lines.append(f"- **No strategy beat the baseline** ({bl_exact:.1f}%) — the simple prompt performed best")
 
-        # Check high thinking
         high_think = next((e for e in exps if e["strategy_name"] == "ar_high_think"), None)
         if high_think and baseline:
             diff = (high_think["exact_match"] or 0) - (baseline["exact_match"] or 0)
             direction = "improved" if diff > 0 else "decreased" if diff < 0 else "unchanged"
             lines.append(f"- **Extended thinking (8192 tokens):** {direction} exact match by {abs(diff):.1f}pp vs baseline")
 
-        # Check flash
         flash = next((e for e in exps if e["strategy_name"] == "ar_flash"), None)
         if flash and baseline:
             diff = (flash["exact_match"] or 0) - (baseline["exact_match"] or 0)
             cost_ratio = (baseline["cost_usd"] / flash["cost_usd"]) if flash["cost_usd"] > 0 else 0
             lines.append(f"- **Flash model:** {diff:+.1f}pp exact match vs Pro, {cost_ratio:.1f}x cheaper")
 
-        # Criterion vs simple
         criterion = next((e for e in exps if e["strategy_name"] == "ar_criterion"), None)
         if criterion and baseline:
             diff = (criterion["exact_match"] or 0) - (baseline["exact_match"] or 0)
@@ -664,14 +817,14 @@ class AutoresearchManager:
         if best["per_question_json"]:
             per_q = json.loads(best["per_question_json"])
             lines.append("## Per-Question Analysis (Best Strategy)\n")
-            lines.append("| Question | Exact % | W/in 1 % | MAE | n |")
-            lines.append("|----------|---------|----------|-----|---|")
+            lines.append("| Question | W/10% | Exact % | W/in 1 % | MAE | n |")
+            lines.append("|----------|-------|---------|----------|-----|---|")
             for qn in sorted(per_q.keys()):
                 m = per_q[qn]
+                w10 = f"{m.get('within_10_pct', 0):.0f}%" if m.get("within_10_pct") is not None else "N/A"
                 w1 = f"{m.get('within_1', 0):.0f}%" if m.get("within_1") is not None else "N/A"
-                lines.append(f"| {qn} | {m['exact_match']:.0f}% | {w1} | {m['mae']:.2f} | {m['n']} |")
+                lines.append(f"| {qn} | {w10} | {m['exact_match']:.0f}% | {w1} | {m['mae']:.2f} | {m['n']} |")
 
-            # Identify weakest
             weakest = min(per_q.items(), key=lambda x: x[1]["exact_match"])
             strongest = max(per_q.items(), key=lambda x: x[1]["exact_match"])
             lines.append(f"\n- **Strongest:** {strongest[0]} ({strongest[1]['exact_match']:.0f}% exact)")
@@ -691,14 +844,12 @@ class AutoresearchManager:
                 lines.append(f"3. **Investigate weak questions** ({', '.join(weak_qs)}) — may benefit from question-specific prompts")
         lines.append(f"4. **Run validation** on the held-out test set ({session['sample_size']} rows) to confirm results generalize")
 
-        # Recommendations for next session
-        recs = self._generate_recommendations(session_id)
         if recs:
             lines.append("\n## Recommendations for Next Session\n")
             lines.append("These recommendations will be automatically used by the next research session.\n")
             lines.append("| Priority | Type | Strategy | Rationale |")
             lines.append("|----------|------|----------|-----------|")
-            for rec in recs[:10]:  # Top 10
+            for rec in recs[:10]:
                 lines.append(
                     f"| {rec['priority']} | {rec['type']} | "
                     f"`{rec['strategy_name']}` | {rec['description']} |"
@@ -881,12 +1032,27 @@ class AutoresearchManager:
             total_spent = 0.0
             best_exact = 0.0
             best_exp_id = None
+            best_score = (0.0, 0.0, 0.0)  # (within_10_pct, exact_match, within_1)
 
-            for recipe_name, recipe_desc, strategy, sys_prompt, config_dict in recipes:
+            for recipe_idx, (recipe_name, recipe_desc, strategy, sys_prompt, config_dict) in enumerate(recipes):
                 if ctx.cancelled:
                     break
-                if total_spent >= budget_usd:
-                    break
+
+                # Budget guard: estimate upcoming cost and skip if over budget
+                if recipe_idx > 0 and total_spent > 0:
+                    avg_cost_per_exp = total_spent / recipe_idx
+                    estimated_cost = avg_cost_per_exp * 1.5  # 1.5x buffer
+                elif recipe_idx == 0:
+                    estimated_cost = budget_usd / max(len(recipes), 1)
+                else:
+                    estimated_cost = 0
+
+                if total_spent + estimated_cost > budget_usd * 1.1:  # 10% grace
+                    ctx.push_event("experiment_skipped", {
+                        "description": recipe_desc,
+                        "reason": f"Budget limit reached (${total_spent:.2f} / ${budget_usd:.2f})",
+                    })
+                    continue
 
                 exp_id = str(uuid.uuid4())
                 now = datetime.now(timezone.utc).isoformat()
@@ -937,11 +1103,11 @@ class AutoresearchManager:
                 cost = total_usage.cost_usd()
                 total_spent += cost
 
-                # Determine if kept (improved over best)
-                kept = metrics.exact_match > best_exact or (
-                    metrics.exact_match == best_exact and best_exp_id is None
-                )
-                if kept:
+                # Determine best by composite score (within_10_pct > exact > within_1)
+                score = (metrics.within_10_pct, metrics.exact_match, metrics.within_1)
+                kept = True  # All experiments are kept — ranking replaces keep/discard
+                if score > best_score or best_exp_id is None:
+                    best_score = score
                     best_exact = metrics.exact_match
                     best_exp_id = exp_id
 
@@ -949,6 +1115,7 @@ class AutoresearchManager:
                     qn: {
                         "n": m.n,
                         "exact_match": m.exact_match,
+                        "within_10_pct": m.within_10_pct,
                         "within_1": m.within_1,
                         "mae": m.mae,
                         "bias": m.mean_signed_error,
@@ -968,13 +1135,14 @@ class AutoresearchManager:
                     db.execute(
                         """INSERT INTO autoresearch_experiments
                         (id, session_id, description, strategy_name, exact_match,
-                         within_1, mae, bias, cost_usd, n, model, kept,
+                         within_10_pct, within_1, mae, bias, cost_usd, n, model, kept,
                          per_question_json, prompt_text, config_json, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (exp_id, ctx.session_id, recipe_desc, strategy.name,
-                         metrics.exact_match, metrics.within_1, metrics.mae,
+                         metrics.exact_match, metrics.within_10_pct,
+                         metrics.within_1, metrics.mae,
                          metrics.mean_signed_error, cost, metrics.n,
-                         strategy.model, int(kept), json.dumps(per_q_data),
+                         strategy.model, 1, json.dumps(per_q_data),
                          sys_prompt, json.dumps(config_dict_full), now),
                     )
                     db.execute(
@@ -991,12 +1159,13 @@ class AutoresearchManager:
                     "description": recipe_desc,
                     "strategy_name": strategy.name,
                     "exact_match": round(metrics.exact_match, 1),
+                    "within_10_pct": round(metrics.within_10_pct, 1),
                     "within_1": round(metrics.within_1, 1),
                     "mae": round(metrics.mae, 3),
                     "bias": round(metrics.mean_signed_error, 3),
                     "cost_usd": round(cost, 4),
                     "n": metrics.n,
-                    "kept": kept,
+                    "kept": True,
                     "per_question": per_q_data,
                     "prompt_text": sys_prompt,
                     "config_json": json.dumps(config_dict_full),
