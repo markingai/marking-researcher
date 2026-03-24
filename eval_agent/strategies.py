@@ -257,17 +257,24 @@ def build_question_router_prompt_fn(
     question_prompts: dict[str, str],
     default_prompt: str,
 ) -> Callable:
-    """Build a prompt_fn that routes to different system prompts per question.
+    """Build a prompt_fn that adapts marking approach by question characteristics.
+
+    The system prompt contains a data-driven playbook of what marking approaches
+    work best for different question types (by mark band and reading/writing).
+    The LLM reads the question's characteristics and adapts its approach accordingly.
 
     Args:
-        question_prompts: mapping of question_number -> system prompt text
-        default_prompt: fallback system prompt for unrecognized questions
+        question_prompts: (legacy) mapping of question_number -> system prompt text.
+                          If empty, default_prompt is used for all questions.
+        default_prompt: the playbook-enriched system prompt (or fallback)
     """
     from .prompts.english_prompts import SIMPLE_SCHEMA
 
     def prompt_fn(row: MarkingRow) -> tuple[str, list[str], dict]:
-        sys_text = question_prompts.get(row.question_number, default_prompt)
+        # Use per-question override if available, otherwise the playbook prompt
+        sys_text = question_prompts.get(row.question_number, default_prompt) if question_prompts else default_prompt
         user_parts = [
+            f"Question type: {row.mark_type or 'unknown'} | Total marks: {row.total_marks}",
             f"Rubric:\n{row.marking_guide}",
         ]
         if row.source_text:

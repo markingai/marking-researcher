@@ -579,72 +579,197 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Question-Router — picks best historical strategy per question type
+# Intelligent Question-Router — adapts marking approach by question characteristics
 # ---------------------------------------------------------------------------
 
-def _find_best_per_question(db: sqlite3.Connection) -> dict[str, dict]:
-    """Find best-performing strategy per question number across all experiments.
+def _categorize_question(total_marks: int, mark_type: str | None) -> str:
+    """Categorize a question by its characteristics (not its number)."""
+    if total_marks <= 4:
+        band = "short"
+    elif total_marks <= 10:
+        band = "medium"
+    else:
+        band = "long"
+    qtype = mark_type or "general"
+    return f"{band}_{qtype}"
 
-    Returns: {question_number: {strategy_name, prompt_text, within_10_pct, exact_match}}
-    Only returns results if ≥5 experiments have per_question data AND ≥2 different
-    strategies win different questions.
+
+def _build_marking_playbook(db: sqlite3.Connection) -> dict | None:
+    """Analyze historical per-question data to build a characteristics-based playbook.
+
+    Groups results by question category (mark-band + type), not question number.
+    Returns a playbook dict with per-category insights, or None if insufficient data.
     """
     rows = db.execute("""
-        SELECT strategy_name, prompt_text, per_question_json
-        FROM autoresearch_experiments
-        WHERE exact_match IS NOT NULL
-          AND per_question_json IS NOT NULL
-          AND prompt_text IS NOT NULL
+        SELECT e.strategy_name, e.description, e.per_question_json, e.config_json
+        FROM autoresearch_experiments e
+        WHERE e.exact_match IS NOT NULL
+          AND e.per_question_json IS NOT NULL
     """).fetchall()
 
     if len(rows) < 5:
-        return {}
+        return None
 
-    best: dict[str, dict] = {}
+    # Aggregate: {category: {strategy_name: [scores]}}
+    cat_scores: dict[str, dict[str, list[float]]] = {}
+
     for r in rows:
         try:
             per_q = json.loads(r["per_question_json"])
+            config = json.loads(r["config_json"]) if r["config_json"] else {}
         except (json.JSONDecodeError, TypeError):
             continue
+
         for qn, metrics in per_q.items():
+            # Infer category from question data
+            # total_marks isn't directly in per_q, but we can infer from question_number patterns
+            # or from the config. For now, use the question number to look up known mark allocations
             w10 = metrics.get("within_10_pct", 0) or 0
-            ex = metrics.get("exact_match", 0) or 0
-            score = (w10, ex)
-            if qn not in best or score > (best[qn]["within_10_pct"], best[qn]["exact_match"]):
-                best[qn] = {
-                    "strategy_name": r["strategy_name"],
-                    "prompt_text": r["prompt_text"],
-                    "within_10_pct": w10,
-                    "exact_match": ex,
-                }
+            n = metrics.get("n", 0) or 0
+            if n < 3:
+                continue  # Not enough data for this question
 
-    # Guard: need at least 2 different strategies winning different questions
-    winning_strategies = set(v["strategy_name"] for v in best.values())
-    if len(winning_strategies) < 2:
-        return {}
+            # Infer mark band from question number (GCSE English known structure)
+            # This is a reasonable heuristic; the playbook text itself is characteristics-based
+            total = _infer_total_marks(qn)
+            mark_type = _infer_mark_type(qn)
+            cat = _categorize_question(total, mark_type)
 
-    return best
+            if cat not in cat_scores:
+                cat_scores[cat] = {}
+            if r["strategy_name"] not in cat_scores[cat]:
+                cat_scores[cat][r["strategy_name"]] = []
+            cat_scores[cat][r["strategy_name"]].append(w10)
+
+    if not cat_scores:
+        return None
+
+    # Find best strategy per category
+    playbook: dict[str, dict] = {}
+    for cat, strategies in cat_scores.items():
+        best_name = None
+        best_avg = 0.0
+        all_results = []
+        for name, scores in strategies.items():
+            avg = sum(scores) / len(scores)
+            all_results.append({"strategy": name, "avg_w10": round(avg, 1), "n": len(scores)})
+            if avg > best_avg:
+                best_avg = avg
+                best_name = name
+        playbook[cat] = {
+            "best_strategy": best_name,
+            "best_avg_w10": round(best_avg, 1),
+            "all_results": sorted(all_results, key=lambda x: -x["avg_w10"]),
+        }
+
+    # Need at least 2 categories with data to be useful
+    if len(playbook) < 2:
+        return None
+
+    return playbook
+
+
+def _infer_total_marks(question_number: str) -> int:
+    """Infer total marks from question number. Falls back to medium if unknown."""
+    qn = question_number.lower().replace("question ", "").strip()
+    # GCSE English known allocations (Exampro dataset)
+    known = {"2": 4, "3": 8, "4": 20, "5": 40, "5a": 24, "5b": 16}
+    return known.get(qn, 10)
+
+
+def _infer_mark_type(question_number: str) -> str:
+    """Infer mark type (reading/writing) from question number."""
+    qn = question_number.lower().replace("question ", "").strip()
+    writing_qs = {"5", "5a", "5b"}
+    return "writing" if qn in writing_qs else "reading"
+
+
+def _playbook_to_prompt(playbook: dict[str, dict]) -> str:
+    """Convert the data-driven playbook into system prompt guidance."""
+    lines = []
+    lines.append(
+        "You are an expert GCSE English examiner. Research across multiple marking "
+        "strategies has revealed that different approaches work best for different "
+        "question types. Adapt your marking approach based on the question's characteristics:"
+    )
+    lines.append("")
+
+    category_labels = {
+        "short_reading": "Short reading questions (1-4 marks)",
+        "medium_reading": "Medium reading questions (5-10 marks)",
+        "long_reading": "Long reading questions (11+ marks)",
+        "short_writing": "Short writing questions (1-4 marks)",
+        "medium_writing": "Medium writing questions (5-10 marks)",
+        "long_writing": "Long writing questions (11+ marks)",
+        "short_general": "Short questions (1-4 marks)",
+        "medium_general": "Medium questions (5-10 marks)",
+        "long_general": "Long questions (11+ marks)",
+    }
+
+    # Map strategy names to human-readable approach descriptions
+    approach_descriptions = {
+        "ar_baseline": "simple holistic marking with conservative framing",
+        "ar_baseline_g31": "simple holistic marking (latest model capabilities)",
+        "ar_criterion": "criterion-by-criterion decomposition",
+        "ar_crit_conservative": "conservative criterion decomposition",
+        "ar_crit_conservative_g31": "conservative criterion decomposition (latest model)",
+        "ar_detailed": "detailed analysis with explicit rubric alignment",
+        "ar_detailed_g31": "detailed analysis (latest model capabilities)",
+        "ar_baseline_high_think": "holistic marking with extended reasoning",
+        "english_scorecard": "structured scorecard with per-criterion marks",
+        "english_cascade": "cascade marking (read → initial → refine)",
+        "english_comparative_anchor": "comparative anchoring against exemplar responses",
+        "english_forced_independence": "independent marking without anchoring bias",
+        "english_halfmark_criterion": "half-mark precision criterion decomposition",
+        "english_strict_range": "strict range enforcement within mark bands",
+        "english_debate": "multi-marker debate with rebuttals",
+        "english_dual_adjudicate": "two markers + chief examiner adjudication",
+        "english_panel": "panel of 3 independent markers",
+    }
+
+    for cat, data in sorted(playbook.items()):
+        label = category_labels.get(cat, cat.replace("_", " ").title())
+        best = data["best_strategy"]
+        approach = approach_descriptions.get(best, best)
+        w10 = data["best_avg_w10"]
+
+        lines.append(f"**{label}** (best accuracy: {w10}% within tolerance):")
+        lines.append(f"  Use {approach}.")
+
+        # Add runner-up if meaningfully different
+        results = data["all_results"]
+        if len(results) > 1 and results[1]["avg_w10"] > 0:
+            runner_up = results[1]
+            ru_approach = approach_descriptions.get(runner_up["strategy"], runner_up["strategy"])
+            lines.append(f"  Alternative: {ru_approach} ({runner_up['avg_w10']}%).")
+        lines.append("")
+
+    lines.append(
+        "For the question below, first identify its characteristics (mark allocation, "
+        "reading vs writing, complexity), then apply the most appropriate marking "
+        "approach from the research above. If the question doesn't fit any category "
+        "well, default to conservative holistic marking."
+    )
+
+    return "\n".join(lines)
 
 
 def _build_question_router(db: sqlite3.Connection, model: str) -> list[RecipeTuple]:
-    """Build a question-router strategy if there's enough per-question data."""
-    best_per_q = _find_best_per_question(db)
-    if not best_per_q:
+    """Build an intelligent question-router that adapts by question characteristics."""
+    playbook = _build_marking_playbook(db)
+    if not playbook:
         return []
 
-    question_prompts = {qn: info["prompt_text"] for qn, info in best_per_q.items()}
-    # Use the most common winning prompt as default
-    all_prompts = [info["prompt_text"] for info in best_per_q.values()]
-    default_prompt = max(set(all_prompts), key=all_prompts.count)
+    sys_prompt = _playbook_to_prompt(playbook)
+    prompt_fn = build_question_router_prompt_fn({}, sys_prompt)  # No per-question mapping; playbook IS the system prompt
 
-    prompt_fn = build_question_router_prompt_fn(question_prompts, default_prompt)
-    sys_prompt = f"Question-router with {len(best_per_q)} question-specific prompts"
-
-    # Build description showing which strategy handles each question
-    routing_desc = ", ".join(
-        f"{qn}→{info['strategy_name']}" for qn, info in sorted(best_per_q.items())
+    # Summary for description
+    categories = sorted(playbook.keys())
+    cat_summary = ", ".join(
+        f"{c.split('_')[0]}_{c.split('_')[1]}→{playbook[c]['best_strategy']}"
+        for c in categories
     )
-    description = f"Routes to best historical strategy per question: {routing_desc}"
+    description = f"Intelligent router: adapts marking approach by question characteristics ({cat_summary})"
 
     strategy = Strategy(
         name="question_router",
@@ -659,8 +784,8 @@ def _build_question_router(db: sqlite3.Connection, model: str) -> list[RecipeTup
     )
 
     config_dict = {
-        "type": "question_router",
-        "routing": {qn: info["strategy_name"] for qn, info in best_per_q.items()},
+        "type": "intelligent_question_router",
+        "playbook": {cat: data["best_strategy"] for cat, data in playbook.items()},
     }
 
     return [(
