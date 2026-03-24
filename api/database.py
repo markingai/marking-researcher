@@ -202,6 +202,25 @@ def _migrate_add_columns(conn: sqlite3.Connection):
             # Column already exists
             pass
 
+    # Backfill best_within_10_pct and best_within_1 on sessions from experiment data
+    conn.execute("""
+        UPDATE autoresearch_sessions
+        SET best_within_10_pct = (
+                SELECT MAX(e.within_10_pct)
+                FROM autoresearch_experiments e
+                WHERE e.session_id = autoresearch_sessions.id
+                  AND e.within_10_pct IS NOT NULL
+            ),
+            best_within_1 = (
+                SELECT MAX(e.within_1)
+                FROM autoresearch_experiments e
+                WHERE e.session_id = autoresearch_sessions.id
+                  AND e.within_1 IS NOT NULL
+            )
+        WHERE best_within_10_pct IS NULL OR best_within_1 IS NULL
+    """)
+    conn.commit()
+
 
 @contextmanager
 def get_db():
