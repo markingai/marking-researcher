@@ -264,6 +264,8 @@ async def get_timeline(
             SELECT s.id as session_id,
                    s.created_at,
                    s.best_exact_match,
+                   COALESCE(s.best_within_10_pct, 0) as best_within_10_pct,
+                   COALESCE(s.best_within_1, 0) as best_within_1,
                    s.experiments_run,
                    s.spent_usd,
                    s.session_number
@@ -347,10 +349,11 @@ async def promote_experiment(
     with get_db() as db:
         db.execute(
             """INSERT INTO runs (id, name, subject, input_mode, status,
-               sample_size_requested, random_seed, model_override, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               sample_size_maths, sample_size_english, random_seed, model_override,
+               created_at, total_strategies)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (run_id, f"Promoted: {exp['description']}", "english", "csv",
-             "pending", 100, 42, model, now),
+             "pending", 0, 100, 42, model, now, 1),
         )
         db.execute(
             """INSERT INTO run_strategies (run_id, strategy_name, status)

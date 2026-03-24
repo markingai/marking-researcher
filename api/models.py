@@ -265,5 +265,8 @@ class TimelineEntry(BaseModel):
     session_id: str
     created_at: str
     best_exact_match: float
+    best_within_10_pct: float = 0.0
+    best_within_1: float = 0.0
     experiments_run: int
     spent_usd: float
+    session_number: int | None = None

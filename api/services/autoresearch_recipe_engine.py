@@ -23,6 +23,7 @@ from eval_agent.strategies import (
     parse_scorecard,
     parse_comparative,
     parse_halfmark,
+    build_question_router_prompt_fn,
 )
 from eval_agent.prompts import english_prompts
 
@@ -577,6 +578,100 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 # Main entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Question-Router — picks best historical strategy per question type
+# ---------------------------------------------------------------------------
+
+def _find_best_per_question(db: sqlite3.Connection) -> dict[str, dict]:
+    """Find best-performing strategy per question number across all experiments.
+
+    Returns: {question_number: {strategy_name, prompt_text, within_10_pct, exact_match}}
+    Only returns results if ≥5 experiments have per_question data AND ≥2 different
+    strategies win different questions.
+    """
+    rows = db.execute("""
+        SELECT strategy_name, prompt_text, per_question_json
+        FROM autoresearch_experiments
+        WHERE exact_match IS NOT NULL
+          AND per_question_json IS NOT NULL
+          AND prompt_text IS NOT NULL
+    """).fetchall()
+
+    if len(rows) < 5:
+        return {}
+
+    best: dict[str, dict] = {}
+    for r in rows:
+        try:
+            per_q = json.loads(r["per_question_json"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for qn, metrics in per_q.items():
+            w10 = metrics.get("within_10_pct", 0) or 0
+            ex = metrics.get("exact_match", 0) or 0
+            score = (w10, ex)
+            if qn not in best or score > (best[qn]["within_10_pct"], best[qn]["exact_match"]):
+                best[qn] = {
+                    "strategy_name": r["strategy_name"],
+                    "prompt_text": r["prompt_text"],
+                    "within_10_pct": w10,
+                    "exact_match": ex,
+                }
+
+    # Guard: need at least 2 different strategies winning different questions
+    winning_strategies = set(v["strategy_name"] for v in best.values())
+    if len(winning_strategies) < 2:
+        return {}
+
+    return best
+
+
+def _build_question_router(db: sqlite3.Connection, model: str) -> list[RecipeTuple]:
+    """Build a question-router strategy if there's enough per-question data."""
+    best_per_q = _find_best_per_question(db)
+    if not best_per_q:
+        return []
+
+    question_prompts = {qn: info["prompt_text"] for qn, info in best_per_q.items()}
+    # Use the most common winning prompt as default
+    all_prompts = [info["prompt_text"] for info in best_per_q.values()]
+    default_prompt = max(set(all_prompts), key=all_prompts.count)
+
+    prompt_fn = build_question_router_prompt_fn(question_prompts, default_prompt)
+    sys_prompt = f"Question-router with {len(best_per_q)} question-specific prompts"
+
+    # Build description showing which strategy handles each question
+    routing_desc = ", ".join(
+        f"{qn}→{info['strategy_name']}" for qn, info in sorted(best_per_q.items())
+    )
+    description = f"Routes to best historical strategy per question: {routing_desc}"
+
+    strategy = Strategy(
+        name="question_router",
+        description=description,
+        subject="english",
+        model=model,
+        temperature=0.0,
+        thinking=True,
+        thinking_budget=4096,
+        prompt_fn=prompt_fn,
+        parse_fn=parse_simple,
+    )
+
+    config_dict = {
+        "type": "question_router",
+        "routing": {qn: info["strategy_name"] for qn, info in best_per_q.items()},
+    }
+
+    return [(
+        "question_router",
+        description,
+        strategy,
+        sys_prompt,
+        config_dict,
+    )]
+
+
 def build_adaptive_recipes(
     model: str,
     sample_size: int,
@@ -617,6 +712,11 @@ def build_adaptive_recipes(
     # For now, we track them but the actual strategy objects come from
     # the sources below. The recommendations guide what to prioritize.
     recommended_names = {r["strategy_name"] for r in recommendations}
+
+    # Priority 5: Question-router meta-strategy (highest priority)
+    router_recipes = _build_question_router(db, model)
+    for recipe in router_recipes:
+        _add(5, recipe)
 
     # Priority 20: Untested strategies from codebase
     codebase_strategies = _build_codebase_strategies(model)

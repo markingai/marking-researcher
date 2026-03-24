@@ -103,12 +103,19 @@ export default function RunHistoryPage() {
                   runs.map((run) => (
                     <TableRow key={run.id}>
                       <TableCell>
-                        <Link
-                          href={`/runs/${run.id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {run.name || run.id.slice(0, 8)}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/runs/${run.id}`}
+                            className="font-medium hover:underline"
+                          >
+                            {run.name || run.id.slice(0, 8)}
+                          </Link>
+                          {run.name?.startsWith("Promoted:") && (
+                            <Badge variant="outline" className="text-xs border-violet-500/30 bg-violet-500/10 text-violet-600">
+                              Autoresearch
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="capitalize">{run.subject}</TableCell>
                       <TableCell>

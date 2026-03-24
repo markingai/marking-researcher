@@ -191,6 +191,8 @@ def _migrate_add_columns(conn: sqlite3.Connection):
         ("autoresearch_sessions", "session_number", "INTEGER"),
         ("autoresearch_sessions", "parent_session_id", "TEXT"),
         ("autoresearch_experiments", "within_10_pct", "REAL"),
+        ("autoresearch_sessions", "best_within_10_pct", "REAL"),
+        ("autoresearch_sessions", "best_within_1", "REAL"),
     ]
     for table, column, col_type in migrations:
         try:

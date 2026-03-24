@@ -1080,10 +1080,12 @@ export default function AutoresearchPage() {
                     </CardHeader>
                     <CardContent>
                       {timeline.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={280}>
+                        <ResponsiveContainer width="100%" height={320}>
                           <LineChart data={timeline.map(t => ({
                             session: t.session_number ? `#${t.session_number}` : `#${timeline.indexOf(t) + 1}`,
                             date: new Date(t.created_at).toLocaleDateString(),
+                            best_w10: t.best_within_10_pct,
+                            best_w1: t.best_within_1,
                             best_exact: t.best_exact_match,
                             experiments: t.experiments_run,
                             spent: t.spent_usd,
@@ -1094,25 +1096,47 @@ export default function AutoresearchPage() {
                             <Tooltip
                               content={({ active, payload }) => {
                                 if (!active || !payload?.length) return null;
-                                const d = payload[0].payload as { session: string; date: string; best_exact: number; experiments: number; spent: number };
+                                const d = payload[0].payload as { session: string; date: string; best_w10: number; best_w1: number; best_exact: number; experiments: number; spent: number };
                                 return (
                                   <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
                                     <div className="font-medium">Session {d.session}</div>
                                     <div className="text-muted-foreground">{d.date}</div>
-                                    <div>Best: {d.best_exact.toFixed(1)}%</div>
-                                    <div>{d.experiments} experiments</div>
-                                    <div>Spent: ${d.spent.toFixed(2)}</div>
+                                    <div className="mt-1 space-y-0.5">
+                                      <div style={{ color: "hsl(210, 71%, 50%)" }}>Within 10%: {d.best_w10.toFixed(1)}%</div>
+                                      <div style={{ color: "hsl(280, 60%, 55%)" }}>Within 1: {d.best_w1.toFixed(1)}%</div>
+                                      <div style={{ color: "hsl(142, 71%, 45%)" }}>Exact: {d.best_exact.toFixed(1)}%</div>
+                                    </div>
+                                    <div className="mt-1 text-muted-foreground">{d.experiments} experiments | ${d.spent.toFixed(2)}</div>
                                   </div>
                                 );
                               }}
                             />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Line
+                              type="monotone"
+                              dataKey="best_w10"
+                              name="Within 10%"
+                              stroke="hsl(210, 71%, 50%)"
+                              strokeWidth={2.5}
+                              dot={{ fill: "hsl(210, 71%, 50%)", r: 5, strokeWidth: 0 }}
+                              connectNulls
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="best_w1"
+                              name="Within 1 Mark"
+                              stroke="hsl(280, 60%, 55%)"
+                              strokeWidth={2}
+                              dot={{ fill: "hsl(280, 60%, 55%)", r: 4, strokeWidth: 0 }}
+                              connectNulls
+                            />
                             <Line
                               type="monotone"
                               dataKey="best_exact"
-                              name="Best Exact %"
+                              name="Exact Match"
                               stroke="hsl(142, 71%, 45%)"
-                              strokeWidth={2.5}
-                              dot={{ fill: "hsl(142, 71%, 45%)", r: 5, strokeWidth: 0 }}
+                              strokeWidth={2}
+                              dot={{ fill: "hsl(142, 71%, 45%)", r: 4, strokeWidth: 0 }}
                               connectNulls
                             />
                           </LineChart>

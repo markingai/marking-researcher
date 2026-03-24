@@ -1046,6 +1046,8 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
 
             total_spent = 0.0
             best_exact = 0.0
+            best_w10 = 0.0
+            best_w1 = 0.0
             best_exp_id = None
             best_score = (0.0, 0.0, 0.0)  # (within_10_pct, exact_match, within_1)
 
@@ -1125,6 +1127,8 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
                     best_score = score
                     best_exact = metrics.exact_match
                     best_exp_id = exp_id
+                best_w10 = max(best_w10, metrics.within_10_pct)
+                best_w1 = max(best_w1, metrics.within_1)
 
                 per_q_data = {
                     qn: {
@@ -1163,9 +1167,10 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
                     db.execute(
                         """UPDATE autoresearch_sessions
                         SET spent_usd=?, experiments_run=experiments_run+1,
-                            best_exact_match=?, best_experiment_id=?
+                            best_exact_match=?, best_within_10_pct=?, best_within_1=?,
+                            best_experiment_id=?
                         WHERE id=?""",
-                        (total_spent, best_exact, best_exp_id, ctx.session_id),
+                        (total_spent, best_exact, best_w10, best_w1, best_exp_id, ctx.session_id),
                     )
 
                 # Push experiment_complete event

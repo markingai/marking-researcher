@@ -251,6 +251,40 @@ def parse_verify(resp: dict) -> dict:
     }
 
 
+# --- Question-Router Factory ---
+
+def build_question_router_prompt_fn(
+    question_prompts: dict[str, str],
+    default_prompt: str,
+) -> Callable:
+    """Build a prompt_fn that routes to different system prompts per question.
+
+    Args:
+        question_prompts: mapping of question_number -> system prompt text
+        default_prompt: fallback system prompt for unrecognized questions
+    """
+    from .prompts.english_prompts import SIMPLE_SCHEMA
+
+    def prompt_fn(row: MarkingRow) -> tuple[str, list[str], dict]:
+        sys_text = question_prompts.get(row.question_number, default_prompt)
+        user_parts = [
+            f"Rubric:\n{row.marking_guide}",
+        ]
+        if row.source_text:
+            user_parts.append(f"Source texts the student was given:\n{row.source_text[:8000]}")
+        user_parts.extend([
+            f"Student response:\n{row.student_answer}",
+            (
+                f"Mark this response out of {row.total_marks} using the rubric above. "
+                f"Return JSON with 'mark' (integer 0 to {row.total_marks}) "
+                "and 'justification' (brief explanation referencing rubric criteria)."
+            ),
+        ])
+        return sys_text, user_parts, SIMPLE_SCHEMA
+
+    return prompt_fn
+
+
 # --- Strategy registry ---
 
 def build_strategies() -> list[Strategy]:

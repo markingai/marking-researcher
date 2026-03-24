@@ -538,6 +538,8 @@ export interface TimelineEntry {
   session_id: string;
   created_at: string;
   best_exact_match: number;
+  best_within_10_pct: number;
+  best_within_1: number;
   experiments_run: number;
   spent_usd: number;
   session_number: number | null;
