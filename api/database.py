@@ -107,6 +107,20 @@ CREATE TABLE IF NOT EXISTS subjects (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS custom_strategies (
+    name TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT 'english',
+    model TEXT NOT NULL,
+    temperature REAL NOT NULL DEFAULT 0.0,
+    thinking_budget INTEGER DEFAULT 4096,
+    prompt_text TEXT NOT NULL,
+    parse_mode TEXT NOT NULL DEFAULT 'simple',
+    source_experiment_id TEXT,
+    config_json TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS autoresearch_sessions (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'running',

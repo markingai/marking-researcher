@@ -281,10 +281,10 @@ async def promote_experiment(
     experiment_id: str,
     _user: dict = Depends(get_current_user),
 ):
-    """Promote an autoresearch experiment to a full eval run."""
-    from ..services.run_manager import run_manager, register_temporary_strategy
-    from eval_agent.strategies import Strategy, parse_simple
+    """Save an autoresearch experiment as a reusable custom strategy.
 
+    The strategy becomes available in the strategy picker for all future runs.
+    """
     with get_db() as db:
         exp = db.execute(
             "SELECT * FROM autoresearch_experiments WHERE id=?", (experiment_id,)
@@ -303,74 +303,52 @@ async def promote_experiment(
     model = config.get("model", "gemini-2.5-pro")
     temperature = config.get("temperature", 0.0)
     thinking_budget = config.get("thinking_budget", 4096)
-    strategy_name = f"promoted_{experiment_id[:8]}"
 
-    # Build a prompt function from stored prompt_text
-    stored_prompt = exp["prompt_text"] or ""
-
-    def _make_promoted_prompt(prompt_text: str):
-        """Create a prompt_fn closure from stored prompt text."""
-        def prompt_fn(row):
-            user_parts = [
-                f"Question: {row.question_text}\n\n"
-                f"Mark scheme: {row.mark_scheme}\n\n"
-                f"Total marks: {row.total_marks}\n\n"
-                f"Student response: {row.student_response}"
-            ]
-            schema = {
-                "type": "OBJECT",
-                "properties": {
-                    "mark": {"type": "INTEGER"},
-                    "justification": {"type": "STRING"},
-                },
-                "required": ["mark", "justification"],
-            }
-            return prompt_text, user_parts, schema
-        return prompt_fn
-
-    strategy = Strategy(
-        name=strategy_name,
-        description=f"Promoted: {exp['description']}",
-        subject="english",
-        model=model,
-        temperature=temperature,
-        thinking=True,
-        thinking_budget=thinking_budget,
-        prompt_fn=_make_promoted_prompt(stored_prompt),
-        parse_fn=parse_simple,
-        provider="gemini",
-    )
-    register_temporary_strategy(strategy)
-
-    # Create a run
-    run_id = str(uuid.uuid4())
+    # Build a clean strategy name from the experiment description
+    base_name = exp["strategy_name"] or "custom"
+    strategy_name = f"ar_{base_name}"
     now = datetime.now(timezone.utc).isoformat()
 
+    prompt_text = exp["prompt_text"] or ""
+    description = exp["description"] or f"Promoted from autoresearch: {base_name}"
+
     with get_db() as db:
+        # Check if already promoted
+        existing = db.execute(
+            "SELECT name FROM custom_strategies WHERE source_experiment_id=?",
+            (experiment_id,),
+        ).fetchone()
+        if existing:
+            return {
+                "strategy_name": existing["name"],
+                "status": "already_exists",
+                "message": f"Strategy '{existing['name']}' already exists from this experiment.",
+            }
+
+        # Ensure unique name
+        count = db.execute(
+            "SELECT COUNT(*) as n FROM custom_strategies WHERE name=?",
+            (strategy_name,),
+        ).fetchone()["n"]
+        if count > 0:
+            strategy_name = f"{strategy_name}_{experiment_id[:6]}"
+
         db.execute(
-            """INSERT INTO runs (id, name, subject, input_mode, status,
-               sample_size_maths, sample_size_english, random_seed, model_override,
-               created_at, total_strategies)
+            """INSERT INTO custom_strategies
+            (name, description, subject, model, temperature, thinking_budget,
+             prompt_text, parse_mode, source_experiment_id, config_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (run_id, f"Promoted: {exp['description']}", "english", "csv",
-             "pending", 0, 100, 42, model, now, 1),
-        )
-        db.execute(
-            """INSERT INTO run_strategies (run_id, strategy_name, status)
-            VALUES (?, ?, ?)""",
-            (run_id, strategy_name, "pending"),
+            (strategy_name, description, "english", model, temperature,
+             thinking_budget, prompt_text, "simple", experiment_id,
+             exp["config_json"], now),
         )
 
-    # Start the run
-    run_manager.start_run(
-        run_id=run_id,
-        subject="english",
-        input_mode="csv",
-        strategy_names=[strategy_name],
-        questions=None,
-        sample_size=100,
-        random_seed=42,
-        model_override=model,
-    )
+    # Reload strategies so the new one is immediately available
+    from ..services.strategy_service import reload_custom_strategies
+    reload_custom_strategies()
 
-    return {"run_id": run_id, "status": "running"}
+    return {
+        "strategy_name": strategy_name,
+        "status": "promoted",
+        "message": f"Strategy '{strategy_name}' is now available for all future runs.",
+    }

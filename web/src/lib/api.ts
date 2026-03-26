@@ -561,7 +561,7 @@ export async function regenerateReport(sessionId: string) {
 }
 
 export async function promoteExperiment(experimentId: string) {
-  return request<{ run_id: string; status: string }>(
+  return request<{ strategy_name: string; status: string; message: string }>(
     `/api/autoresearch/experiments/${experimentId}/promote`,
     { method: "POST" },
   );

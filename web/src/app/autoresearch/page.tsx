@@ -311,8 +311,12 @@ export default function AutoresearchPage() {
   const handlePromote = async (experimentId: string) => {
     setPromoting(experimentId);
     try {
-      await promoteExperiment(experimentId);
-      toast.success("Full evaluation started!");
+      const result = await promoteExperiment(experimentId);
+      if (result.status === "already_exists") {
+        toast.info(result.message);
+      } else {
+        toast.success(`Strategy '${result.strategy_name}' saved! It's now available in New Run.`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to promote experiment");
     } finally {
@@ -842,7 +846,7 @@ export default function AutoresearchPage() {
                             ) : (
                               <Rocket className="h-3.5 w-3.5" />
                             )}
-                            Run Full Evaluation
+                            Save as Strategy
                           </Button>
                         </div>
                       </div>
