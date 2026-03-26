@@ -167,6 +167,12 @@ class RunManager:
                         )
                         break
 
+            # Add custom strategies from autoresearch promotion
+            from .strategy_service import reload_custom_strategies, _custom_strategies
+            if not _custom_strategies:
+                reload_custom_strategies()
+            all_strategies.extend(_custom_strategies)
+
             # Check temporary registry for promoted strategies
             for sn in list(strategy_names):
                 if sn in _temporary_strategies:
