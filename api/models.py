@@ -27,7 +27,7 @@ class StrategyInfo(BaseModel):
     subject: str
     model: str
     provider: str
-    phase: int | None = None
+    phase: int | str | None = None
     tags: list[str] = []
     is_two_pass: bool = False
     has_debate: bool = False

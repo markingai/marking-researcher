@@ -51,8 +51,13 @@ def reload_custom_strategies():
     global _custom_strategies
     from ..database import get_db
     strategies = []
-    with get_db() as db:
-        rows = db.execute("SELECT * FROM custom_strategies ORDER BY created_at").fetchall()
+    try:
+        with get_db() as db:
+            rows = db.execute("SELECT * FROM custom_strategies ORDER BY created_at").fetchall()
+    except Exception:
+        # Table may not exist yet
+        _custom_strategies = []
+        return
     for row in rows:
         strategies.append(Strategy(
             name=row["name"],
