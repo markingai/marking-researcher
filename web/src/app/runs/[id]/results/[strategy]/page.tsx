@@ -96,8 +96,9 @@ export default function StrategyDrillDownPage() {
                   <TableRow>
                     <TableHead>Question</TableHead>
                     <TableHead className="text-right">N</TableHead>
+                    <TableHead className="text-right font-bold">W/10%</TableHead>
                     <TableHead className="text-right">Exact%</TableHead>
-                    <TableHead className="text-right">Within 1%</TableHead>
+                    <TableHead className="text-right">Within 1 Mark</TableHead>
                     <TableHead className="text-right">MAE</TableHead>
                     <TableHead className="text-right">Bias</TableHead>
                   </TableRow>
@@ -107,6 +108,7 @@ export default function StrategyDrillDownPage() {
                     <TableRow key={q.question_number}>
                       <TableCell className="font-medium">Q{q.question_number}</TableCell>
                       <TableCell className="text-right">{q.metrics.n}</TableCell>
+                      <TableCell className="text-right font-bold">{q.metrics.within_10_pct}%</TableCell>
                       <TableCell className="text-right">{q.metrics.exact_match_pct}%</TableCell>
                       <TableCell className="text-right">{q.metrics.within_1_pct}%</TableCell>
                       <TableCell className="text-right">{q.metrics.mae}</TableCell>

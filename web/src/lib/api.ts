@@ -326,6 +326,7 @@ export interface MetricSet {
   exact_match_pct: number;
   exact_match_rounded_pct: number;
   within_half_pct: number;
+  within_10_pct: number;
   within_1_pct: number;
   mae: number;
   mean_signed_error: number;

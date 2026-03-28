@@ -128,12 +128,14 @@ def get_run_results_detail(
 
 def _compute_metrics_from_rows(rows: list) -> dict:
     """Compute MetricSet from DB rows."""
+    from eval_agent.metrics import _within_10_pct_threshold
+
     valid = [r for r in rows if not r["error"] and r["ai_mark"] >= 0]
     n = len(valid)
     if n == 0:
         return MetricSetResponse(
             n=0, exact_match_pct=0, exact_match_rounded_pct=0,
-            within_half_pct=0, within_1_pct=0, mae=0,
+            within_half_pct=0, within_10_pct=0, within_1_pct=0, mae=0,
             mean_signed_error=0, over_mark_pct=0, under_mark_pct=0,
             errors=len(rows),
         ).model_dump()
@@ -141,6 +143,10 @@ def _compute_metrics_from_rows(rows: list) -> dict:
     exact = sum(1 for r in valid if r["ai_mark"] == r["human_mark"])
     exact_rounded = sum(1 for r in valid if r["ai_mark"] == round(r["human_mark"]))
     within_half = sum(1 for r in valid if abs(r["ai_mark"] - r["human_mark"]) <= 0.5)
+    within_10 = sum(
+        1 for r in valid
+        if abs(r["ai_mark"] - r["human_mark"]) <= _within_10_pct_threshold(r["total_marks"])
+    )
     within_1 = sum(1 for r in valid if abs(r["ai_mark"] - r["human_mark"]) <= 1)
 
     errors_list = [r["ai_mark"] - r["human_mark"] for r in valid]
@@ -152,6 +158,7 @@ def _compute_metrics_from_rows(rows: list) -> dict:
         exact_match_pct=round(exact / n * 100, 1),
         exact_match_rounded_pct=round(exact_rounded / n * 100, 1),
         within_half_pct=round(within_half / n * 100, 1),
+        within_10_pct=round(within_10 / n * 100, 1),
         within_1_pct=round(within_1 / n * 100, 1),
         mae=round(sum(abs(e) for e in errors_list) / n, 3),
         mean_signed_error=round(sum(errors_list) / n, 3),

@@ -24,7 +24,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
   Legend,
 } from "recharts";
 import { getResultsSummary, getRun, type ResultsSummary, type RunDetail } from "@/lib/api";
@@ -51,9 +50,9 @@ export default function ResultsOverviewPage() {
 
   const chartData = summary.strategies.map((s) => ({
     name: s.name.replace(/^(maths_|english_)/, ""),
+    "Within 10%": s.metrics.within_10_pct,
     "Exact Match %": s.metrics.exact_match_pct,
-    "Within 1 %": s.metrics.within_1_pct,
-    MAE: s.metrics.mae,
+    "Within 1 Mark": s.metrics.within_1_pct,
   }));
 
   // Bias analysis data
@@ -97,11 +96,11 @@ export default function ResultsOverviewPage() {
           <Card>
             <CardContent className="pt-6 text-center">
               <div className="text-2xl font-bold text-green-600">
-                {summary.best_strategy
-                  ? summary.strategies.find((s) => s.name === summary.best_strategy)?.metrics.exact_match_pct + "%"
+                {summary.strategies.length > 0
+                  ? Math.max(...summary.strategies.map((s) => s.metrics.within_10_pct)).toFixed(1) + "%"
                   : "N/A"}
               </div>
-              <div className="text-xs text-muted-foreground">Best Exact%</div>
+              <div className="text-xs text-muted-foreground">Best W/10%</div>
             </CardContent>
           </Card>
           <Card>
@@ -126,19 +125,9 @@ export default function ResultsOverviewPage() {
                   <YAxis domain={[0, 100]} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="Exact Match %" fill="hsl(221, 83%, 53%)" radius={[4, 4, 0, 0]}>
-                    {chartData.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={
-                          summary.strategies[i].name === summary.best_strategy
-                            ? "hsl(142, 71%, 45%)"
-                            : "hsl(221, 83%, 53%)"
-                        }
-                      />
-                    ))}
-                  </Bar>
-                  <Bar dataKey="Within 1 %" fill="hsl(221, 83%, 73%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Within 10%" fill="hsl(142, 71%, 45%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Exact Match %" fill="hsl(221, 83%, 53%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Within 1 Mark" fill="hsl(221, 83%, 73%)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -222,8 +211,9 @@ export default function ResultsOverviewPage() {
                   <TableRow>
                     <TableHead>Strategy</TableHead>
                     <TableHead className="text-right">N</TableHead>
+                    <TableHead className="text-right font-bold">W/10%</TableHead>
                     <TableHead className="text-right">Exact%</TableHead>
-                    <TableHead className="text-right">Within 1%</TableHead>
+                    <TableHead className="text-right">Within 1 Mark</TableHead>
                     <TableHead className="text-right">MAE</TableHead>
                     <TableHead className="text-right">Bias</TableHead>
                     <TableHead className="text-right">Over%</TableHead>
@@ -249,6 +239,9 @@ export default function ResultsOverviewPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">{s.metrics.n}</TableCell>
+                      <TableCell className="text-right font-bold">
+                        {s.metrics.within_10_pct}%
+                      </TableCell>
                       <TableCell className="text-right font-medium">
                         {s.metrics.exact_match_pct}%
                       </TableCell>

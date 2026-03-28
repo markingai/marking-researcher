@@ -109,6 +109,7 @@ class MetricSetResponse(BaseModel):
     exact_match_pct: float
     exact_match_rounded_pct: float
     within_half_pct: float
+    within_10_pct: float
     within_1_pct: float
     mae: float
     mean_signed_error: float
