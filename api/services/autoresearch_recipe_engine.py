@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -582,7 +583,51 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 # Intelligent Question-Router — adapts marking approach by question characteristics
 # ---------------------------------------------------------------------------
 
-def _categorize_question(total_marks: int, mark_type: str | None) -> str:
+def extract_question_characteristics(
+    marking_guide: str,
+    total_marks: int,
+    mark_type: str | None = None,
+    has_source: bool = False,
+) -> dict:
+    """Extract routing characteristics from marking guide text.
+
+    These characteristics are stored alongside per-question metrics so the
+    playbook builder can categorize questions across any dataset — no hardcoded
+    question-number lookups needed.
+    """
+    words = marking_guide.split() if marking_guide else []
+
+    # Rubric type detection
+    has_levels = bool(re.search(r"Level \d|Band \d|Grade \d", marking_guide or "", re.I))
+    has_ao = bool(re.search(r"AO\d|Assessment Objective", marking_guide or "", re.I))
+    bullet_count = (marking_guide or "").count("•") + (marking_guide or "").count("- ")
+
+    if has_levels:
+        rubric_type = "level_descriptors"
+    elif bullet_count > 3 or has_ao:
+        rubric_type = "point_based"
+    else:
+        rubric_type = "holistic"
+
+    # Criteria count
+    ao_matches = re.findall(r"AO\d+", marking_guide or "")
+    criteria_count = len(set(ao_matches)) if ao_matches else (1 if len(words) < 50 else 2)
+
+    return {
+        "total_marks": total_marks,
+        "mark_type": mark_type or "unknown",
+        "has_source_text": has_source,
+        "rubric_type": rubric_type,
+        "marking_guide_length": len(words),
+        "criteria_count": criteria_count,
+    }
+
+
+def _categorize_question(
+    total_marks: int,
+    mark_type: str | None,
+    rubric_type: str | None = None,
+) -> str:
     """Categorize a question by its characteristics (not its number)."""
     if total_marks <= 4:
         band = "short"
@@ -591,6 +636,9 @@ def _categorize_question(total_marks: int, mark_type: str | None) -> str:
     else:
         band = "long"
     qtype = mark_type or "general"
+    # Include rubric type if available for finer-grained categories
+    if rubric_type and rubric_type != "holistic":
+        return f"{band}_{qtype}_{rubric_type}"
     return f"{band}_{qtype}"
 
 
@@ -607,7 +655,7 @@ def _build_marking_playbook(db: sqlite3.Connection) -> dict | None:
           AND e.per_question_json IS NOT NULL
     """).fetchall()
 
-    if len(rows) < 5:
+    if len(rows) < 3:
         return None
 
     # Aggregate: {category: {strategy_name: [scores]}}
@@ -629,11 +677,11 @@ def _build_marking_playbook(db: sqlite3.Connection) -> dict | None:
             if n < 3:
                 continue  # Not enough data for this question
 
-            # Infer mark band from question number (GCSE English known structure)
-            # This is a reasonable heuristic; the playbook text itself is characteristics-based
-            total = _infer_total_marks(qn)
-            mark_type = _infer_mark_type(qn)
-            cat = _categorize_question(total, mark_type)
+            # Use stored characteristics if available, fall back to inference for old data
+            total = metrics.get("total_marks") or _infer_total_marks(qn)
+            mark_type = metrics.get("mark_type") or _infer_mark_type(qn)
+            rubric_type = metrics.get("rubric_type")
+            cat = _categorize_question(total, mark_type, rubric_type)
 
             if cat not in cat_scores:
                 cat_scores[cat] = {}
@@ -688,19 +736,35 @@ def _playbook_to_prompt(playbook: dict[str, dict]) -> str:
     """Convert the data-driven playbook into system prompt guidance."""
     lines = []
     lines.append(
-        "You are an expert GCSE English examiner. Research across multiple marking "
-        "strategies has revealed that different approaches work best for different "
-        "question types. Adapt your marking approach based on the question's characteristics:"
+        "You are an expert examiner. Research across multiple marking strategies has "
+        "revealed that different approaches work best for different question types. "
+        "Before marking, analyse the question's characteristics and adapt your approach."
     )
+    lines.append("")
+    lines.append("## How to identify question characteristics")
+    lines.append("1. **Mark allocation**: How many marks? (1-4 = short, 5-10 = medium, 11+ = long)")
+    lines.append("2. **Assessment type**: Reading comprehension vs creative/analytical writing")
+    lines.append("3. **Rubric structure**: Does the marking guide use level/band descriptors, "
+                 "point-by-point criteria (AO1, AO2...), or holistic impression?")
+    lines.append("4. **Rubric complexity**: Short simple rubric → mark directly. "
+                 "Long detailed rubric → decompose into criteria.")
+    lines.append("")
+    lines.append("## Research-backed guidance by question type")
     lines.append("")
 
     category_labels = {
         "short_reading": "Short reading questions (1-4 marks)",
+        "short_reading_point_based": "Short reading questions with point-based rubric (1-4 marks)",
         "medium_reading": "Medium reading questions (5-10 marks)",
+        "medium_reading_level_descriptors": "Medium reading questions with level descriptors (5-10 marks)",
+        "medium_reading_point_based": "Medium reading questions with point-based rubric (5-10 marks)",
         "long_reading": "Long reading questions (11+ marks)",
+        "long_reading_level_descriptors": "Long reading questions with level descriptors (11+ marks)",
         "short_writing": "Short writing questions (1-4 marks)",
         "medium_writing": "Medium writing questions (5-10 marks)",
+        "medium_writing_level_descriptors": "Medium writing with level descriptors (5-10 marks)",
         "long_writing": "Long writing questions (11+ marks)",
+        "long_writing_level_descriptors": "Long writing with level descriptors (11+ marks)",
         "short_general": "Short questions (1-4 marks)",
         "medium_general": "Medium questions (5-10 marks)",
         "long_general": "Long questions (11+ marks)",
@@ -744,11 +808,16 @@ def _playbook_to_prompt(playbook: dict[str, dict]) -> str:
             lines.append(f"  Alternative: {ru_approach} ({runner_up['avg_w10']}%).")
         lines.append("")
 
+    lines.append("## Instructions")
     lines.append(
-        "For the question below, first identify its characteristics (mark allocation, "
-        "reading vs writing, complexity), then apply the most appropriate marking "
-        "approach from the research above. If the question doesn't fit any category "
-        "well, default to conservative holistic marking."
+        "For the question below:\n"
+        "1. Read the rubric/marking guide carefully\n"
+        "2. Identify: mark allocation, reading vs writing, rubric structure "
+        "(level descriptors / point-based / holistic)\n"
+        "3. Match to the closest category above and apply that marking approach\n"
+        "4. If the question doesn't fit any category well, default to conservative "
+        "holistic marking\n"
+        "5. Award marks conservatively — it is better to under-mark slightly than over-mark"
     )
 
     return "\n".join(lines)
@@ -826,8 +895,9 @@ def build_adaptive_recipes(
         )
         if key in seen_keys:
             return
-        # Skip if already tested (by strategy name)
-        if strategy.name in tested_names:
+        # Skip if already tested (by strategy name) — except question_router
+        # which evolves its playbook with each session's new data
+        if strategy.name in tested_names and strategy.name != "question_router":
             return
         seen_keys.add(key)
         recipes.append((priority, recipe))

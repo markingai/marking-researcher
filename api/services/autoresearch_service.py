@@ -1130,6 +1130,18 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
                 best_w10 = max(best_w10, metrics.within_10_pct)
                 best_w1 = max(best_w1, metrics.within_1)
 
+                # Build question characteristics lookup from sample rows
+                from .autoresearch_recipe_engine import extract_question_characteristics
+                q_chars: dict[str, dict] = {}
+                for row in eval_rows:
+                    if row.question_number not in q_chars:
+                        q_chars[row.question_number] = extract_question_characteristics(
+                            row.marking_guide,
+                            row.total_marks,
+                            getattr(row, "mark_type", None),
+                            bool(row.source_text),
+                        )
+
                 per_q_data = {
                     qn: {
                         "n": m.n,
@@ -1138,6 +1150,7 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
                         "within_1": m.within_1,
                         "mae": m.mae,
                         "bias": m.mean_signed_error,
+                        **q_chars.get(qn, {}),
                     }
                     for qn, m in per_q.items()
                 }
