@@ -39,6 +39,7 @@ def _row_to_session(row) -> AutoresearchSessionResponse:
         report_md=row["report_md"] if "report_md" in row.keys() else None,
         session_number=row["session_number"] if "session_number" in row.keys() else None,
         parent_session_id=row["parent_session_id"] if "parent_session_id" in row.keys() else None,
+        bias_mode=row["bias_mode"] if "bias_mode" in row.keys() else "neutral",
     )
 
 
@@ -96,11 +97,12 @@ async def start_session(
         ).fetchone()
         parent_id = parent_row["id"] if parent_row else None
 
+        bias_mode = getattr(req, "bias_mode", "neutral") or "neutral"
         db.execute(
             """INSERT INTO autoresearch_sessions
-            (id, status, budget_usd, model, sample_size, session_number, parent_session_id, created_at)
-            VALUES (?, 'running', ?, ?, ?, ?, ?, ?)""",
-            (session_id, req.budget_usd, req.model, req.sample_size, session_number, parent_id, now),
+            (id, status, budget_usd, model, sample_size, session_number, parent_session_id, bias_mode, created_at)
+            VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, req.budget_usd, req.model, req.sample_size, session_number, parent_id, bias_mode, now),
         )
 
     autoresearch_manager.start_session(
@@ -108,6 +110,7 @@ async def start_session(
         budget_usd=req.budget_usd,
         sample_size=req.sample_size,
         model=req.model,
+        bias_mode=bias_mode,
     )
 
     return {"session_id": session_id, "status": "running"}

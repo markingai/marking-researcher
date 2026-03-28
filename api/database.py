@@ -207,6 +207,7 @@ def _migrate_add_columns(conn: sqlite3.Connection):
         ("autoresearch_experiments", "within_10_pct", "REAL"),
         ("autoresearch_sessions", "best_within_10_pct", "REAL"),
         ("autoresearch_sessions", "best_within_1", "REAL"),
+        ("autoresearch_sessions", "bias_mode", "TEXT DEFAULT 'neutral'"),
     ]
     for table, column, col_type in migrations:
         try:

@@ -135,6 +135,10 @@ def load_exampro(path: Path | None = None) -> list[MarkingRow]:
             hm = r.get("human_mark", "").strip()
             if not hm:
                 continue
+            hm_val = float(hm)
+            tm_val = int(r["total_marks"])
+            if hm_val > tm_val or hm_val < 0:
+                continue  # Skip corrupted rows (e.g. Q3 marks > total_marks)
             # Use enriched marking_guide_text when available, fall back to marking_guide
             guide_text = r.get("marking_guide_text", "").strip()
             guide = guide_text if guide_text else r.get("marking_guide", "")
@@ -143,10 +147,10 @@ def load_exampro(path: Path | None = None) -> list[MarkingRow]:
                 subject="english",
                 question_number=r["question_number"],
                 question_text=r.get("question_text", ""),
-                total_marks=int(r["total_marks"]),
+                total_marks=tm_val,
                 marking_guide=guide,
                 student_answer=r["student_answer"],
-                human_mark=float(hm),
+                human_mark=hm_val,
                 source_text=r.get("source_text", ""),
                 marking_guide_text=guide_text or None,
                 mark_type=r.get("mark_type", ""),

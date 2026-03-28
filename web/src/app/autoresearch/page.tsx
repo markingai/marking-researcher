@@ -95,7 +95,8 @@ export default function AutoresearchPage() {
 
   // Config
   const [budget, setBudget] = useState(20);
-  const [sampleSize, setSampleSize] = useState(50);
+  const [sampleSize, setSampleSize] = useState(100);
+  const [biasMode, setBiasMode] = useState("neutral");
   const [model, setModel] = useState("gemini-2.5-pro");
 
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -250,6 +251,7 @@ export default function AutoresearchPage() {
         budget_usd: budget,
         sample_size: sampleSize,
         model,
+        bias_mode: biasMode,
       });
       const newSession: AutoresearchSession = {
         id: result.session_id,
@@ -530,6 +532,19 @@ export default function AutoresearchPage() {
                               <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
                               <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
                               <SelectItem value="gemini-3.1-pro-preview">Gemini 3.1 Pro</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Bias Mode</Label>
+                          <Select value={biasMode} onValueChange={setBiasMode}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="conservative">Conservative (under-mark)</SelectItem>
+                              <SelectItem value="neutral">Neutral (balanced)</SelectItem>
+                              <SelectItem value="generous">Generous (benefit of doubt)</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

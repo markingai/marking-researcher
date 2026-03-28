@@ -385,7 +385,7 @@ def _build_variations(
         # Higher thinking budget variation
         if pr.best_config and pr.best_config.get("thinking_budget", tb) < 8192:
             # Re-create the strategy with higher thinking
-            sys_text = f"You are a senior GCSE English Language examiner. Mark strictly according to the mark scheme. Award only what is clearly evidenced. When in doubt, award the lower level. (Variant of {pr.strategy_name} with extended thinking)"
+            sys_text = f"You are an expert examiner. Mark strictly according to the mark scheme. Award only what is clearly evidenced. When in doubt, award the lower level. (Variant of {pr.strategy_name} with extended thinking)"
             variations.append((
                 f"{pr.strategy_name}_high_think",
                 f"{pr.strategy_name} with 8192 thinking budget",
@@ -407,7 +407,7 @@ def _build_variations(
         # Gemini 3.1 variant (if not already tested on 3.1)
         g31_name = f"{pr.strategy_name}_g31"
         if g31_name not in prior:
-            sys_text = f"You are a senior GCSE English Language examiner. Mark strictly according to the mark scheme. Award only what is clearly evidenced. (Variant of {pr.strategy_name} on Gemini 3.1)"
+            sys_text = f"You are an expert examiner. Mark strictly according to the mark scheme. Award only what is clearly evidenced. (Variant of {pr.strategy_name} on Gemini 3.1)"
             variations.append((
                 g31_name,
                 f"{pr.strategy_name} on Gemini 3.1 Pro",
@@ -439,7 +439,7 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 
     # Cascade + conservative: conservative framing in pass 2
     sys_text = (
-        "You are a senior GCSE English Language examiner known for strict, rigorous marking. "
+        "You are an expert examiner known for strict, rigorous marking. "
         "You are scoring within a predetermined band. Only award marks where clear evidence exists. "
         "Err on the side of under-marking."
     )
@@ -464,7 +464,7 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 
     # Criterion + forced independence (anti-collapse criterion scoring)
     sys_text = (
-        "You are a senior GCSE English Language examiner. "
+        "You are an expert examiner. "
         "Decompose the mark scheme into criteria and assess each INDEPENDENTLY. "
         "CRITICAL: Each criterion must be scored on its own merits. "
         "If you find yourself giving the same score for every criterion, stop — this is a red flag. "
@@ -490,7 +490,7 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 
     # Level matching + high thinking
     sys_text = (
-        "You are a senior GCSE English Language examiner. Take extra time to think carefully. "
+        "You are an expert examiner. Take extra time to think carefully. "
         "Use levels-based assessment:\n"
         "1. Read the full response thoroughly\n"
         "2. Match to the best-fit level descriptor\n"
@@ -523,7 +523,7 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
             # Check if we can detect bias from the config/name pattern
             # We'll generate a generic bias-correction prompt
             sys_text = (
-                "You are a senior GCSE English Language examiner. "
+                "You are an expert examiner. "
                 "Research shows AI markers tend to over-mark by 0.3-0.5 marks on average. "
                 "Compensate for this: be slightly stricter than your initial instinct. "
                 "Mark only what is clearly evidenced. "
@@ -549,7 +549,7 @@ def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTup
 
     # Flash ensemble — 3x Flash averaged
     sys_text = (
-        "You are a senior GCSE English Language examiner. "
+        "You are an expert examiner. "
         "Score each criterion independently. Forces independent scoring per criterion. "
         "When in doubt, award the lower level."
     )
@@ -743,7 +743,7 @@ def _playbook_to_prompt(playbook: dict[str, dict]) -> str:
     lines.append("")
     lines.append("## How to identify question characteristics")
     lines.append("1. **Mark allocation**: How many marks? (1-4 = short, 5-10 = medium, 11+ = long)")
-    lines.append("2. **Assessment type**: Reading comprehension vs creative/analytical writing")
+    lines.append("2. **Assessment type**: What skill is being assessed? (analysis, comprehension, writing, problem-solving, etc.)")
     lines.append("3. **Rubric structure**: Does the marking guide use level/band descriptors, "
                  "point-by-point criteria (AO1, AO2...), or holistic impression?")
     lines.append("4. **Rubric complexity**: Short simple rubric → mark directly. "
@@ -871,6 +871,7 @@ def build_adaptive_recipes(
     sample_size: int,
     budget_usd: float,
     db: sqlite3.Connection,
+    bias_mode: str = "neutral",
 ) -> list[RecipeTuple]:
     """Build a priority-ordered recipe queue that learns from prior sessions.
 

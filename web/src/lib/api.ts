@@ -466,6 +466,7 @@ export async function startAutoresearchSession(config: {
   budget_usd?: number;
   sample_size?: number;
   model?: string;
+  bias_mode?: string;
 }) {
   return request<{ session_id: string; status: string }>(
     "/api/autoresearch/sessions",

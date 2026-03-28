@@ -205,6 +205,7 @@ class StartAutoresearchRequest(BaseModel):
     budget_usd: float = 20.0
     sample_size: int = 30
     model: str = "gemini-2.5-pro"
+    bias_mode: str = "neutral"  # conservative, neutral, generous
 
 class AutoresearchSessionResponse(BaseModel):
     id: str
@@ -221,6 +222,7 @@ class AutoresearchSessionResponse(BaseModel):
     report_md: str | None = None
     session_number: int | None = None
     parent_session_id: str | None = None
+    bias_mode: str = "neutral"
 
 class AutoresearchExperimentResponse(BaseModel):
     id: str

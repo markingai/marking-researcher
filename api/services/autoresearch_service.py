@@ -121,18 +121,17 @@ def _make_criterion_prompt_fn(system_text: str):
     return prompt_fn
 
 
-def _make_level_matching_prompt_fn():
+def _make_level_matching_prompt_fn(bias_instruction: str = ""):
     """Prompt that explicitly asks the model to identify the level first, then place within it."""
     def prompt_fn(row: MarkingRow) -> tuple[str, list[str], dict]:
         system = (
-            "You are a senior GCSE English Language examiner. You mark using the "
+            "You are an expert examiner. You mark using the "
             "levels-based assessment approach:\n"
             "1. Read the full response\n"
             "2. Match the response to the best-fit level descriptor\n"
             "3. Determine whether the response sits at the top, middle, or bottom of that level\n"
             "4. Award the corresponding mark\n"
-            "When borderline between levels, award the lower level. "
-            "Mark only what is clearly evidenced."
+            f"Mark only what is clearly evidenced. {bias_instruction}"
         )
         user_parts = [f"## Mark Scheme\n\n{row.marking_guide}"]
         if row.source_text:
@@ -150,18 +149,18 @@ def _make_level_matching_prompt_fn():
     return prompt_fn
 
 
-def _make_reading_specialist_prompt_fn():
-    """Optimized for reading comprehension questions (Q2-Q4)."""
+def _make_reading_specialist_prompt_fn(bias_instruction: str = ""):
+    """Optimized for questions where students analyse source material."""
     def prompt_fn(row: MarkingRow) -> tuple[str, list[str], dict]:
         system = (
-            "You are a senior GCSE English Language examiner specializing in reading "
-            "comprehension assessment. You evaluate student responses for:\n"
-            "- Quality and specificity of textual references\n"
-            "- Depth of analysis of language/structural methods\n"
-            "- Understanding of writer's effects and purpose\n"
-            "- Use of subject terminology\n"
-            "Award marks strictly based on the level descriptors. "
-            "Do not reward paraphrasing or retelling without analysis."
+            "You are an expert examiner specializing in analytical assessment. "
+            "You evaluate student responses for:\n"
+            "- Quality and specificity of references to the source material\n"
+            "- Depth of analysis and interpretation\n"
+            "- Understanding of techniques and their effects\n"
+            "- Use of appropriate subject terminology\n"
+            "Award marks strictly based on the level descriptors in the mark scheme. "
+            f"Do not reward paraphrasing or retelling without analysis. {bias_instruction}"
         )
         user_parts = [f"## Mark Scheme\n\n{row.marking_guide}"]
         if row.source_text:
@@ -177,19 +176,15 @@ def _make_reading_specialist_prompt_fn():
     return prompt_fn
 
 
-def _make_writing_specialist_prompt_fn():
-    """Optimized for extended writing questions (Q5)."""
+def _make_writing_specialist_prompt_fn(bias_instruction: str = ""):
+    """Optimized for extended writing / high-mark questions."""
     def prompt_fn(row: MarkingRow) -> tuple[str, list[str], dict]:
         system = (
-            "You are a senior GCSE English Language examiner specializing in "
-            "extended writing assessment. Evaluate against two Assessment Objectives:\n"
-            "- AO5 (Content & Organisation): Ideas, perspective, structure, paragraphing, "
-            "cohesion, register, vocabulary\n"
-            "- AO6 (Technical Accuracy): Sentence structures, punctuation, spelling, "
-            "Standard English, vocabulary range\n"
-            "Mark each AO against its level descriptors. "
+            "You are an expert examiner specializing in extended writing assessment. "
+            "If the mark scheme has multiple assessment objectives or criteria, "
+            "evaluate against each one separately using their level descriptors. "
             "Reward ambition alongside accuracy. "
-            "When borderline, award the lower level."
+            f"Mark only what is clearly evidenced. {bias_instruction}"
         )
         user_parts = [f"## Mark Scheme\n\n{row.marking_guide}"]
         user_parts.append(f"## Question\n\n{row.question_text}")
@@ -204,27 +199,34 @@ def _make_writing_specialist_prompt_fn():
     return prompt_fn
 
 
-def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, dict]]:
+BIAS_INSTRUCTIONS = {
+    "conservative": "When in doubt, award the lower mark. It is better to under-mark slightly than over-mark.",
+    "neutral": "Award marks fairly based on the evidence. Neither inflate nor deflate.",
+    "generous": "Give the student the benefit of the doubt. If their response could reasonably merit the higher mark, award it.",
+}
+
+
+def build_recipe_strategies(model: str, bias_mode: str = "neutral") -> list[tuple[str, str, Strategy, str, dict]]:
     """Build all strategy variation recipes.
 
     Returns (name, description, Strategy, system_prompt_text, config_dict) tuples.
     """
+    bias = BIAS_INSTRUCTIONS.get(bias_mode, BIAS_INSTRUCTIONS["neutral"])
 
     recipes = []
 
     # 1. Baseline
     _sys_baseline = (
-        "You are a senior GCSE English Language examiner. "
-        "Mark student responses strictly according to the mark scheme. "
-        "Award only what is clearly evidenced. "
-        "When in doubt between two levels, award the lower level."
+        "You are an expert examiner. "
+        "Mark student responses strictly according to the mark scheme provided. "
+        f"Award only what is clearly evidenced. {bias}"
     )
     recipes.append((
         "baseline",
-        "Simple mark scheme prompt with conservative framing",
+        "Simple mark scheme prompt with baseline framing",
         Strategy(
             name="ar_baseline",
-            description="GCSE baseline — simple prompt",
+            description="Baseline — simple prompt",
             subject="english",
             model=model,
             temperature=0.0,
@@ -239,8 +241,7 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 2. Conservative
     _sys_conservative = (
-        "You are a senior GCSE English Language examiner known for strict, "
-        "rigorous marking. You never award marks generously. "
+        "You are an expert examiner known for strict, rigorous marking. "
         "Every mark must be fully justified by clear evidence in the response. "
         "If you are uncertain whether a descriptor is met, do NOT award the marks. "
         "Err on the side of under-marking rather than over-marking."
@@ -250,7 +251,7 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         "Extra conservative framing — penalizes over-marking",
         Strategy(
             name="ar_conservative",
-            description="GCSE conservative — strict marking",
+            description="Conservative — strict marking",
             subject="english",
             model=model,
             temperature=0.0,
@@ -268,16 +269,16 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 3. Criterion decomposed
     _sys_criterion = (
-        "You are a senior GCSE English Language examiner. "
+        "You are an expert examiner. "
         "Decompose the mark scheme into individual criteria and assess "
-        "each one independently before determining the total mark."
+        f"each one independently before determining the total mark. {bias}"
     )
     recipes.append((
         "criterion_decomposed",
         "Break mark scheme into criteria, score each independently",
         Strategy(
             name="ar_criterion",
-            description="GCSE criterion decomposed — score each criterion",
+            description="Criterion decomposed — score each criterion",
             subject="english",
             model=model,
             temperature=0.0,
@@ -292,21 +293,20 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 4. Level matching
     _sys_level_match = (
-        "You are a senior GCSE English Language examiner. You mark using the "
+        "You are an expert examiner. You mark using the "
         "levels-based assessment approach:\n"
         "1. Read the full response\n"
         "2. Match the response to the best-fit level descriptor\n"
         "3. Determine whether the response sits at the top, middle, or bottom of that level\n"
         "4. Award the corresponding mark\n"
-        "When borderline between levels, award the lower level. "
-        "Mark only what is clearly evidenced."
+        f"Mark only what is clearly evidenced. {bias}"
     )
     recipes.append((
         "level_matching",
         "Explicit level identification then placement within level",
         Strategy(
             name="ar_level_match",
-            description="GCSE level matching — identify level first",
+            description="Level matching — identify level first",
             subject="english",
             model=model,
             temperature=0.0,
@@ -319,23 +319,23 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         {"schema": "simple", "thinking_budget": eval_config.THINKING_BUDGET},
     ))
 
-    # 5. Reading specialist
+    # 5. Reading / analytical specialist
     _sys_reading = (
-        "You are a senior GCSE English Language examiner specializing in reading "
-        "comprehension assessment. You evaluate student responses for:\n"
-        "- Quality and specificity of textual references\n"
-        "- Depth of analysis of language/structural methods\n"
-        "- Understanding of writer's effects and purpose\n"
-        "- Use of subject terminology\n"
-        "Award marks strictly based on the level descriptors. "
-        "Do not reward paraphrasing or retelling without analysis."
+        "You are an expert examiner specializing in analytical assessment. "
+        "You evaluate student responses for:\n"
+        "- Quality and specificity of references to the source material\n"
+        "- Depth of analysis and interpretation\n"
+        "- Understanding of techniques and their effects\n"
+        "- Use of appropriate subject terminology\n"
+        "Award marks strictly based on the level descriptors in the mark scheme. "
+        f"Do not reward paraphrasing or retelling without analysis. {bias}"
     )
     recipes.append((
         "reading_specialist",
-        "Prompt optimized for reading questions (Q2-Q4)",
+        "Prompt optimized for analytical / source-based questions",
         Strategy(
             name="ar_reading",
-            description="GCSE reading specialist — textual analysis focus",
+            description="Analytical specialist — source-based assessment",
             subject="english",
             model=model,
             temperature=0.0,
@@ -348,24 +348,19 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         {"schema": "simple", "thinking_budget": eval_config.THINKING_BUDGET, "focus": "reading Q2-Q4"},
     ))
 
-    # 6. Writing specialist
+    # 6. Writing / extended response specialist
     _sys_writing = (
-        "You are a senior GCSE English Language examiner specializing in "
-        "extended writing assessment. Evaluate against two Assessment Objectives:\n"
-        "- AO5 (Content & Organisation): Ideas, perspective, structure, paragraphing, "
-        "cohesion, register, vocabulary\n"
-        "- AO6 (Technical Accuracy): Sentence structures, punctuation, spelling, "
-        "Standard English, vocabulary range\n"
-        "Mark each AO against its level descriptors. "
-        "Reward ambition alongside accuracy. "
-        "When borderline, award the lower level."
+        "You are an expert examiner specializing in extended writing assessment. "
+        "If the mark scheme has multiple assessment objectives or criteria, "
+        "evaluate against each one separately using their level descriptors. "
+        f"Reward ambition alongside accuracy. {bias}"
     )
     recipes.append((
         "writing_specialist",
-        "Prompt optimized for writing questions (Q5)",
+        "Prompt optimized for extended writing / high-mark questions",
         Strategy(
             name="ar_writing",
-            description="GCSE writing specialist — AO5/AO6 focus",
+            description="Extended writing specialist — multi-criteria",
             subject="english",
             model=model,
             temperature=0.0,
@@ -380,18 +375,17 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 7. Higher thinking budget
     _sys_high_think = (
-        "You are a senior GCSE English Language examiner. "
-        "Mark student responses strictly according to the mark scheme. "
+        "You are an expert examiner. "
+        "Mark student responses strictly according to the mark scheme provided. "
         "Take your time to think carefully. "
-        "Award only what is clearly evidenced. "
-        "When in doubt between two levels, award the lower level."
+        f"Award only what is clearly evidenced. {bias}"
     )
     recipes.append((
         "high_thinking",
         "Baseline with 2x thinking budget (8192 tokens)",
         Strategy(
             name="ar_high_think",
-            description="GCSE baseline with extended thinking",
+            description="Baseline with extended thinking",
             subject="english",
             model=model,
             temperature=0.0,
@@ -411,7 +405,7 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         "Gemini 2.5 Flash — 8x cheaper, test quality tradeoff",
         Strategy(
             name="ar_flash",
-            description="GCSE baseline on Flash model",
+            description="Baseline on Flash model",
             subject="english",
             model=eval_config.MODEL_FLASH,
             temperature=0.0,
@@ -426,8 +420,7 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 9. Detailed instructions
     _sys_detailed = (
-        "You are a senior GCSE English Language examiner with 15 years of "
-        "experience. Follow this exact marking procedure:\n\n"
+        "You are an expert examiner. Follow this exact marking procedure:\n\n"
         "1. Read the entire student response carefully\n"
         "2. Re-read the mark scheme level descriptors from highest to lowest\n"
         "3. Identify which level best describes the student's work\n"
@@ -436,16 +429,16 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         "5. Award the corresponding mark\n\n"
         "Key principles:\n"
         "- Best fit: match to the level that most closely describes the work\n"
-        "- Borderline: when between levels, award the lower level\n"
-        "- Evidence: only credit what is actually present in the response\n"
-        "- Consistency: apply the same standard to every response"
+        f"- Evidence: only credit what is actually present in the response\n"
+        f"- Consistency: apply the same standard to every response\n"
+        f"- {bias}"
     )
     recipes.append((
         "detailed_instructions",
         "Verbose prompt with step-by-step marking instructions",
         Strategy(
             name="ar_detailed",
-            description="GCSE detailed step-by-step instructions",
+            description="Detailed step-by-step instructions",
             subject="english",
             model=model,
             temperature=0.0,
@@ -460,8 +453,8 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
 
     # 10. Criterion + conservative combo
     _sys_crit_conservative = (
-        "You are a senior GCSE English Language examiner known for strict, "
-        "rigorous marking. Decompose the mark scheme into criteria. "
+        "You are an expert examiner known for strict, rigorous marking. "
+        "Decompose the mark scheme into criteria. "
         "For each criterion, only award marks where clear evidence exists. "
         "When in doubt, award the lower mark. "
         "Be particularly careful not to over-mark."
@@ -471,7 +464,7 @@ def build_recipe_strategies(model: str) -> list[tuple[str, str, Strategy, str, d
         "Criterion decomposition with conservative framing",
         Strategy(
             name="ar_crit_conservative",
-            description="GCSE criterion + conservative combo",
+            description="Criterion + conservative combo",
             subject="english",
             model=model,
             temperature=0.0,
@@ -569,6 +562,7 @@ class AutoresearchManager:
         budget_usd: float,
         sample_size: int,
         model: str,
+        bias_mode: str = "neutral",
     ):
         ctx = SessionContext(session_id=session_id)
         with self._lock:
@@ -576,7 +570,7 @@ class AutoresearchManager:
 
         thread = threading.Thread(
             target=self._execute_session,
-            args=(ctx, budget_usd, sample_size, model),
+            args=(ctx, budget_usd, sample_size, model, bias_mode),
             daemon=True,
         )
         thread.start()
@@ -689,7 +683,7 @@ class AutoresearchManager:
 
         context_str = "\n".join(context_parts)
 
-        system_prompt = """You are a research analyst writing a report on AI marking strategy experiments for GCSE English.
+        system_prompt = """You are a research analyst writing a report on AI marking strategy experiments.
 
 Write a structured Markdown research report. Be specific with numbers, reference strategy names, and explain WHY certain approaches worked or didn't based on what the strategy does.
 
@@ -848,7 +842,7 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
 
         # Recommendations
         lines.append("## Recommendations\n")
-        lines.append(f"1. **Deploy `{best['strategy_name']}`** as the production strategy for GCSE English marking")
+        lines.append(f"1. **Deploy `{best['strategy_name']}`** as the production marking strategy")
         if best["bias"] and abs(best["bias"]) > 0.3:
             direction = "over-marking" if best["bias"] > 0 else "under-marking"
             lines.append(f"2. **Address {direction} bias** ({best['bias']:+.2f}) — consider adjusting prompt framing")
@@ -1025,6 +1019,7 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
         budget_usd: float,
         sample_size: int,
         model: str,
+        bias_mode: str = "neutral",
     ):
         try:
             # Load and split data
@@ -1040,9 +1035,9 @@ Keep the report concise but insightful — aim for 600-1000 words of actual anal
             # Build recipes — adaptive if prior data exists, else fixed
             from .autoresearch_recipe_engine import build_adaptive_recipes
             with database.get_db() as db:
-                recipes = build_adaptive_recipes(model, sample_size, budget_usd, db)
+                recipes = build_adaptive_recipes(model, sample_size, budget_usd, db, bias_mode=bias_mode)
             if not recipes:
-                recipes = build_recipe_strategies(model)
+                recipes = build_recipe_strategies(model, bias_mode=bias_mode)
 
             total_spent = 0.0
             best_exact = 0.0
