@@ -40,8 +40,9 @@ def _recipe_key(name: str, model: str, thinking_budget: int | None, temperature:
 
 @dataclass
 class _PriorResult:
-    """Aggregated stats for a previously-tested strategy."""
+    """Aggregated stats for a previously-tested (strategy, model) pair."""
     strategy_name: str
+    model: str | None
     best_exact: float
     avg_exact: float
     times_tested: int
@@ -49,10 +50,16 @@ class _PriorResult:
     best_config: dict | None
 
 
-def _query_prior_results(db: sqlite3.Connection) -> dict[str, _PriorResult]:
-    """Query all prior experiment results, grouped by strategy_name."""
+def _query_prior_results(db: sqlite3.Connection) -> dict[tuple[str, str | None], _PriorResult]:
+    """Query all prior experiment results, grouped by (strategy_name, model).
+
+    Grouping by model — not just strategy_name — lets the adaptive engine
+    re-test a strategy when the session model changes (e.g. swapping to a
+    newly-released judge model).
+    """
     rows = db.execute("""
         SELECT strategy_name,
+               model,
                MAX(exact_match) as best_exact,
                AVG(exact_match) as avg_exact,
                COUNT(*) as times_tested,
@@ -60,11 +67,11 @@ def _query_prior_results(db: sqlite3.Connection) -> dict[str, _PriorResult]:
                config_json
         FROM autoresearch_experiments
         WHERE exact_match IS NOT NULL
-        GROUP BY strategy_name
+        GROUP BY strategy_name, model
         ORDER BY MAX(exact_match) DESC
     """).fetchall()
 
-    results = {}
+    results: dict[tuple[str, str | None], _PriorResult] = {}
     for r in rows:
         config = None
         if r["config_json"]:
@@ -72,8 +79,9 @@ def _query_prior_results(db: sqlite3.Connection) -> dict[str, _PriorResult]:
                 config = json.loads(r["config_json"])
             except (json.JSONDecodeError, TypeError):
                 pass
-        results[r["strategy_name"]] = _PriorResult(
+        results[(r["strategy_name"], r["model"])] = _PriorResult(
             strategy_name=r["strategy_name"],
+            model=r["model"],
             best_exact=r["best_exact"] or 0,
             avg_exact=r["avg_exact"] or 0,
             times_tested=r["times_tested"],
@@ -369,7 +377,7 @@ def _build_codebase_strategies(model: str) -> list[RecipeTuple]:
 
 
 def _build_variations(
-    prior: dict[str, _PriorResult],
+    prior: dict[tuple[str, str | None], _PriorResult],
     model: str,
 ) -> list[RecipeTuple]:
     """Generate parameter variations of top-performing strategies."""
@@ -406,7 +414,7 @@ def _build_variations(
 
         # Gemini 3.1 variant (if not already tested on 3.1)
         g31_name = f"{pr.strategy_name}_g31"
-        if g31_name not in prior:
+        if not any(name == g31_name for name, _ in prior):
             sys_text = f"You are an expert examiner. Mark strictly according to the mark scheme. Award only what is clearly evidenced. (Variant of {pr.strategy_name} on Gemini 3.1)"
             variations.append((
                 g31_name,
@@ -430,7 +438,7 @@ def _build_variations(
     return variations
 
 
-def _build_hybrids(prior: dict[str, _PriorResult], model: str) -> list[RecipeTuple]:
+def _build_hybrids(prior: dict[tuple[str, str | None], _PriorResult], model: str) -> list[RecipeTuple]:
     """Generate hybrid combinations based on what worked."""
     from .autoresearch_service import _make_prompt_fn, _make_criterion_prompt_fn, _parse_simple, _parse_criterion
 
@@ -883,7 +891,9 @@ def build_adaptive_recipes(
         return []  # No prior data — caller uses fixed recipes
 
     recommendations = _query_recommendations(db)
-    tested_names = set(prior.keys())
+    # Dedup against (strategy_name, model) — switching to a new judge model
+    # should re-trigger the full recipe sweep on that model.
+    tested_keys: set[tuple[str, str | None]] = set(prior.keys())
 
     recipes: list[tuple[int, RecipeTuple]] = []  # (priority, recipe)
     seen_keys: set[str] = set()
@@ -896,9 +906,9 @@ def build_adaptive_recipes(
         )
         if key in seen_keys:
             return
-        # Skip if already tested (by strategy name) — except question_router
-        # which evolves its playbook with each session's new data
-        if strategy.name in tested_names and strategy.name != "question_router":
+        # Skip if already tested on this model — except question_router,
+        # which evolves its playbook with each session's new data.
+        if (strategy.name, strategy.model) in tested_keys and strategy.name != "question_router":
             return
         seen_keys.add(key)
         recipes.append((priority, recipe))
@@ -947,9 +957,14 @@ def build_adaptive_recipes(
         strategy = recipe[2]
         config = recipe[4]
 
-        # Estimate cost from prior data or defaults
-        if strategy.name in prior:
-            est_cost = prior[strategy.name].avg_cost
+        # Estimate cost from prior data or defaults. Prefer an exact
+        # (name, model) match; fall back to any prior run of this strategy.
+        prior_key = (strategy.name, strategy.model)
+        same_name = [p for (n, _), p in prior.items() if n == strategy.name]
+        if prior_key in prior:
+            est_cost = prior[prior_key].avg_cost
+        elif same_name:
+            est_cost = sum(p.avg_cost for p in same_name) / len(same_name)
         else:
             multiplier = config.get("cost_multiplier", 1)
             est_cost = default_cost * multiplier
