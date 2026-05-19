@@ -47,7 +47,10 @@ class GeminiClient(BaseClient):
             f"?key={self.api_key}"
         )
 
-        generation_config: dict = {"temperature": temperature}
+        # Gemini 3.x: Google recommends not setting temperature/top_p/top_k —
+        # reasoning is optimised for defaults. Only send it for 2.x models.
+        is_gemini_3x = self.model.startswith("gemini-3")
+        generation_config: dict = {} if is_gemini_3x else {"temperature": temperature}
 
         if response_schema:
             generation_config["response_mime_type"] = "application/json"
@@ -55,7 +58,7 @@ class GeminiClient(BaseClient):
 
         if thinking:
             # Gemini 3.x uses thinkingLevel instead of thinkingBudget
-            if self.model.startswith("gemini-3"):
+            if is_gemini_3x:
                 level = thinking_level or "high"
                 generation_config["thinkingConfig"] = {
                     "thinkingLevel": level,

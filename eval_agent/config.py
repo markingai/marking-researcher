@@ -18,6 +18,7 @@ MODEL_PRO = "gemini-2.5-pro"
 MODEL_FLASH = "gemini-2.5-flash"
 MODEL_GEMINI_3 = "gemini-3-pro-preview"
 MODEL_GEMINI_31 = "gemini-3.1-pro-preview"
+MODEL_FLASH_35 = "gemini-3.5-flash"
 MODEL_CLAUDE = "claude-opus-4-6-20260301"
 MODEL_GPT = "gpt-5.2"
 MODEL_DEFAULT = MODEL_PRO
@@ -62,6 +63,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "gemini-2.5-flash":         {"input": 0.15,  "output": 0.60},
     "gemini-3.1-pro-preview":   {"input": 2.00,  "output": 12.00},
     "gemini-3-pro-preview":     {"input": 2.00,  "output": 12.00},
+    "gemini-3.5-flash":         {"input": 1.50,  "output": 9.00},
     "claude-opus-4-6-20260301": {"input": 5.00,  "output": 25.00},
     "gpt-5.2":                  {"input": 1.75,  "output": 14.00},
 }
