@@ -125,9 +125,14 @@ Strategy(
 
 ## Models Available
 
-- `config.MODEL_DEFAULT` = `gemini-2.5-pro` — best quality, ~$1.25/MTok in
-- `config.MODEL_FLASH` = `gemini-2.5-flash` — fast and cheap, ~$0.15/MTok in
+- `config.MODEL_DEFAULT` = `gemini-2.5-pro` — $1.25 in / $10.00 out per MTok
+- `config.MODEL_FLASH` = `gemini-2.5-flash` — $0.15 in / $0.60 out per MTok
+- `config.MODEL_FLASH_35` = `gemini-3.5-flash` — $1.50 in / $9.00 out per MTok, 1M context, thinking levels: minimal/low/medium (default)/high
+- `config.MODEL_GEMINI_3` = `gemini-3-pro-preview` — $2.00 in / $12.00 out per MTok
+- `config.MODEL_GEMINI_31` = `gemini-3.1-pro-preview` — $2.00 in / $12.00 out per MTok
 - Any Gemini 2.5+ model
+
+Gemini 3.x models use `thinking_level` ("minimal", "low", "medium", "high") instead of `thinking_budget`. The client handles this routing automatically based on the model name. For 3.x models, `temperature` is not sent (Google's guidance is that reasoning is optimised for the defaults).
 
 ## Important Notes
 
